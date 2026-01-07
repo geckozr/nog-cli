@@ -48,6 +48,9 @@
   },
   "license": "Apache-2.0",
   "author": "geckozr",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^15.1.2",
     "@loopback/openapi-v3-types": "^1.2.1",
