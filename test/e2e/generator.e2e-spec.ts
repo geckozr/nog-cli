@@ -43,7 +43,7 @@ const TEST_CASES = [
 
 const runCli = (inputPath: string, outputPath: string): void => {
   execSync(
-    `node ${path.resolve('dist/src/index.js')} generate ${path.resolve(inputPath)} -o ${outputPath}`,
+    `node ${path.resolve('dist/src/main.js')} generate ${path.resolve(inputPath)} -o ${outputPath}`,
     { stdio: 'inherit' },
   );
 };
