@@ -4,7 +4,8 @@
 [![npm version](https://img.shields.io/npm/v/nog-cli.svg)](https://www.npmjs.com/package/nog-cli)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node.js Version](https://img.shields.io/node/v/nog-cli.svg)](https://nodejs.org/)
-[![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)](./coverage/)
+[![codecov](https://codecov.io/gh/geckozr/nog-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/geckozr/nog-cli)
+[![Documentation](https://img.shields.io/badge/docs-TypeDoc-blue.svg)](https://geckozr.github.io/nog-cli/)
 
 A command-line interface tool for generating strict, type-safe NestJS SDKs from OpenAPI 3.0 specifications.
 
