@@ -21,7 +21,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "deps:check": "npx depcheck . --ignores='ts-node,vitest,vite,prettier,eslint,eslint-*,@typescript-eslint,@vitest,@trivago/prettier-plugin-sort-imports,@stylistic,@types,@vitest/coverage-v8'",
+    "deps:check": "npx depcheck . --ignores='ts-node,vitest,vite,prettier,eslint,eslint-*,@typescript-eslint,@vitest,@trivago/prettier-plugin-sort-imports,@stylistic,@types,@vitest/coverage-v8,husky,@commitlint/*'",
     "pack:dry": "npm pack --dry-run",
     "prepublishOnly": "npm run lint && npm run build && npm test"
   },
