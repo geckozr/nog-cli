@@ -1,9 +1,9 @@
 # nog-cli
 
 [![CI](https://github.com/geckozr/nog-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/geckozr/nog-cli/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/nog-cli.svg)](https://www.npmjs.com/package/nog-cli)
+[![npm version](https://img.shields.io/npm/v/@gecko_zr/nog-cli.svg)](https://www.npmjs.com/package/@gecko_zr/nog-cli)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node.js Version](https://img.shields.io/node/v/nog-cli.svg)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/node/v/@gecko_zr/nog-cli.svg)](https://nodejs.org/)
 [![codecov](https://codecov.io/gh/geckozr/nog-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/geckozr/nog-cli)
 [![Documentation](https://img.shields.io/badge/docs-TypeDoc-blue.svg)](https://geckozr.github.io/nog-cli/)
 
@@ -27,13 +27,13 @@ A command-line interface tool for generating strict, type-safe NestJS SDKs from 
 Install globally:
 
 ```bash
-npm install -g nog-cli
+npm install -g @gecko_zr/nog-cli
 ```
 
 Or as a dev dependency:
 
 ```bash
-npm install --save-dev nog-cli
+npm install --save-dev @gecko_zr/nog-cli
 ```
 
 ## Quick Start
@@ -41,7 +41,7 @@ npm install --save-dev nog-cli
 ### 1. Generate SDK from OpenAPI File
 
 ```bash
-nog-cli generate -i ./specs/petstore.json -o ./src/generated
+nog-cli generate ./specs/petstore.json -o ./src/generated
 ```
 
 ### 2. Use the Generated Module
@@ -93,11 +93,7 @@ Arguments:
 
 Options:
   -o, --output <directory>       Output directory for generated code (default: ./output)
-  -m, --module-name <name>       Name of the generated NestJS module (default: Api)
-  -s, --service-prefix <prefix>  Prefix for service class names (default: empty)
-  --timeout <ms>                 Timeout for remote file fetching (default: 20000)
-  --no-typed-errors              Disable typed error handling
-  --default-type <type>          Default TypeScript type for unknown schemas (default: any)
+  -m, --module-name <name>       Name of the generated NestJS module (default: ApiModule)
   -h, --help                     Display help information
 ```
 

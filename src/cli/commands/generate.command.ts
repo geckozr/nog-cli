@@ -11,11 +11,7 @@ import { CommandConfig, CommandHandler } from '../types';
  */
 export interface GenerateOptions {
   output: string;
-  timeout: number;
-  typedErrors: boolean;
   moduleName: string;
-  servicePrefix: string;
-  defaultType: string;
 }
 
 /**
@@ -41,25 +37,6 @@ const generateCommandConfig: Omit<CommandConfig<GenerateOptions>, 'action'> = {
       description: 'Name of the generated NestJS module',
       defaultValue: 'ApiModule',
     },
-    {
-      flags: '-s, --service-prefix <prefix>',
-      description: 'Prefix for generated service class names',
-      defaultValue: '',
-    },
-    {
-      flags: '--timeout <ms>',
-      description: 'Timeout value in milliseconds for remote file fetching',
-      defaultValue: '20000',
-    },
-    {
-      flags: '--no-typed-errors',
-      description: 'Disable typed error handling (ApiException class)',
-    },
-    {
-      flags: '--default-type <type>',
-      description: 'TypeScript type to use for unknown schemas (e.g. "unknown" or "any")',
-      defaultValue: 'any',
-    },
   ],
 };
 
@@ -84,9 +61,6 @@ export class GenerateCommand implements CommandHandler<GenerateOptions> {
     Logger.info('  OpenAPI file:', openapiFile);
     Logger.info('  Output:', options.output);
     Logger.info('  Module name:', options.moduleName);
-    Logger.info('  Service prefix:', options.servicePrefix);
-    Logger.info('  Typed errors:', options.typedErrors);
-    Logger.info('  Default type:', options.defaultType);
 
     // 1. Parse OpenAPI
     const openApi = await OpenApiParser.parse(openapiFile);
