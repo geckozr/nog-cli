@@ -160,6 +160,11 @@ export class ImportHelper {
     });
 
     sourceFile.addImportDeclaration({
+      moduleSpecifier: '../api.configuration',
+      namedImports: ['ApiConfiguration'],
+    });
+
+    sourceFile.addImportDeclaration({
       moduleSpecifier: 'rxjs',
       namedImports: ['Observable', 'firstValueFrom'],
     });
@@ -169,12 +174,62 @@ export class ImportHelper {
       namedImports: ['map'],
     });
 
+    sourceFile.addImportDeclaration({
+      moduleSpecifier: 'axios',
+      namedImports: ['AxiosResponse'],
+    });
+
+    // Check if any operation uses multipart/form-data for file uploads
+    const needsFormData = this.serviceUsesMultipartFormData(service);
+    if (needsFormData) {
+      sourceFile.addImportDeclaration({
+        moduleSpecifier: '../api.utils',
+        namedImports: ['toFormData'],
+      });
+    }
+
+    // Check if any operation uses Buffer | ReadStream for file uploads
+    const needsReadStream = this.serviceUsesFileUploads(service);
+    if (needsReadStream) {
+      sourceFile.addImportDeclaration({
+        moduleSpecifier: 'fs',
+        namedImports: ['ReadStream'],
+      });
+    }
+
     const modelsMap = new Map<string, IrModel>();
     for (const model of allModels) {
       modelsMap.set(model.name, model);
     }
 
     this.addOperationDtoImports(sourceFile, service, modelsMap);
+  }
+
+  /**
+   * Checks if the service has any operations with file upload parameters (Buffer | ReadStream).
+   */
+  private static serviceUsesFileUploads(service: IrService): boolean {
+    for (const [, operation] of service.operations) {
+      for (const param of operation.parameters) {
+        const rawType = param.type.rawType;
+        if (typeof rawType === 'string' && rawType.includes('ReadStream')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Checks if the service has any operations with multipart/form-data request content type.
+   */
+  private static serviceUsesMultipartFormData(service: IrService): boolean {
+    for (const [, operation] of service.operations) {
+      if (operation.requestContentType === 'multipart/form-data') {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static addOperationDtoImports(

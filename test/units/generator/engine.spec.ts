@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GeneratorEngine } from '../../src/core/generator/engine';
-import { IrDefinition } from '../../src/core/ir/interfaces/index';
+import { GeneratorEngine } from '../../../src/core/generator/engine';
+import { IrDefinition } from '../../../src/core/ir/interfaces/index';
 
 /**
  * Hoisted mocks to enable access within vi.mock factories (prevents out-of-scope variable errors).
@@ -36,7 +36,7 @@ vi.mock('ts-morph', () => {
 /**
  * Mock DtoWriter with hoisted spy.
  */
-vi.mock('../../src/core/generator/writers/dto.writer', () => ({
+vi.mock('../../../src/core/generator/writers/dto.writer', () => ({
   DtoWriter: vi.fn(function DtoWriterMock() {
     return {
       writeAll: mocks.dtoWriteAll,
@@ -47,7 +47,7 @@ vi.mock('../../src/core/generator/writers/dto.writer', () => ({
 /**
  * Mock ServiceWriter with hoisted spy.
  */
-vi.mock('../../src/core/generator/writers/service.writer', () => ({
+vi.mock('../../../src/core/generator/writers/service.writer', () => ({
   ServiceWriter: vi.fn(function ServiceWriterMock() {
     return {
       writeAll: mocks.serviceWriteAll,
@@ -58,7 +58,7 @@ vi.mock('../../src/core/generator/writers/service.writer', () => ({
 /**
  * Mock ModuleWriter with hoisted spy.
  */
-vi.mock('../../src/core/generator/writers/module.writer', () => ({
+vi.mock('../../../src/core/generator/writers/module.writer', () => ({
   ModuleWriter: vi.fn(function ModuleWriterMock() {
     return {
       write: mocks.moduleWrite,
@@ -69,7 +69,7 @@ vi.mock('../../src/core/generator/writers/module.writer', () => ({
 /**
  * Mock IndexWriter with hoisted spy.
  */
-vi.mock('../../src/core/generator/writers/index.writer', () => ({
+vi.mock('../../../src/core/generator/writers/index.writer', () => ({
   IndexWriter: vi.fn(function IndexWriterMock() {
     return {
       write: mocks.indexWrite,
@@ -80,7 +80,7 @@ vi.mock('../../src/core/generator/writers/index.writer', () => ({
 /**
  * Mock Logger with hoisted spies.
  */
-vi.mock('../../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
   Logger: {
     info: mocks.loggerInfo,
     error: mocks.loggerError,
@@ -140,7 +140,7 @@ describe('GeneratorEngine', () => {
     const engine = new GeneratorEngine(mockOutputDir, { moduleName: 'CustomModule' });
     await engine.generate(mockIr);
 
-    const { ModuleWriter } = await import('../../src/core/generator/writers/module.writer');
+    const { ModuleWriter } = await import('../../../src/core/generator/writers/module.writer');
     expect(ModuleWriter).toHaveBeenCalledWith(
       expect.anything(),
       mockOutputDir,

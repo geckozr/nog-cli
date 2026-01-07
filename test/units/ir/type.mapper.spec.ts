@@ -5,10 +5,10 @@ import { IrModel, IrType, TypeMapper } from '../../../src/core/ir';
 
 describe('TypeMapper', () => {
   const registry = new Map<string, IrModel>([
-    ['User', { name: 'User', properties: [], isEnum: false }],
-    ['Base', { name: 'Base', properties: [], isEnum: false }],
-    ['First', { name: 'First', isEnum: false, properties: [] }],
-    ['Second', { name: 'Second', isEnum: false, properties: [] }],
+    ['User', { name: 'User', properties: [], isEnum: false, fileName: 'user.dto' }],
+    ['Base', { name: 'Base', properties: [], isEnum: false, fileName: 'base.dto' }],
+    ['First', { name: 'First', isEnum: false, properties: [], fileName: 'first.dto' }],
+    ['Second', { name: 'Second', isEnum: false, properties: [], fileName: 'second.dto' }],
   ]);
 
   describe('map', () => {
@@ -135,7 +135,7 @@ describe('TypeMapper', () => {
           ],
           [
             { type: 'string', format: 'binary' },
-            { rawType: 'Blob', isArray: false, isPrimitive: false },
+            { rawType: 'Buffer', isArray: false, isPrimitive: false },
           ],
           [
             { type: undefined, format: 'null' },
@@ -390,7 +390,7 @@ describe('TypeMapper', () => {
     it('should handle array schema without items property', () => {
       const schema: OpenAPIV3.SchemaObject = {
         type: 'array',
-      };
+      } as any; // Bypass TypeScript check to test edge case
 
       const iType = TypeMapper.map(schema, new Map());
 

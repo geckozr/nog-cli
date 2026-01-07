@@ -99,7 +99,8 @@ export class IndexWriter {
   }
 
   /**
-   * Generates the main entry point index file re-exporting DTO and service barrels.
+   * Generates the main entry point index file re-exporting DTO and service barrels,
+   * plus the dynamic module, configuration, types, and utilities.
    *
    * @returns Promise resolving when the root index is written.
    */
@@ -116,6 +117,26 @@ export class IndexWriter {
     // Re-export Services barrel
     sourceFile.addExportDeclaration({
       moduleSpecifier: './services',
+    });
+
+    // Re-export Dynamic Module
+    sourceFile.addExportDeclaration({
+      moduleSpecifier: './api.module',
+    });
+
+    // Re-export Configuration Service
+    sourceFile.addExportDeclaration({
+      moduleSpecifier: './api.configuration',
+    });
+
+    // Re-export Types and Interfaces
+    sourceFile.addExportDeclaration({
+      moduleSpecifier: './api.types',
+    });
+
+    // Re-export Utilities
+    sourceFile.addExportDeclaration({
+      moduleSpecifier: './api.utils',
     });
 
     FileHeaderHelper.addHeader(sourceFile, this.specTitle, this.specVersion);

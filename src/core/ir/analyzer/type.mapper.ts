@@ -15,11 +15,13 @@ export class TypeMapper {
    *
    * @param schema - The OpenAPI schema or reference object.
    * @param registry - The global model registry used to resolve references.
+   * @param context - Optional context to distinguish request vs response (affects binary type mapping).
    * @returns The parsed Internal Representation type.
    */
   static map(
     schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
     registry: Map<string, IrModel>,
+    context?: { isRequestBody?: boolean; contentType?: string },
   ): IrType {
     // Handle undefined or null schema
     if (!schema) {
@@ -46,17 +48,17 @@ export class TypeMapper {
 
     // 4. Arrays
     if (schemaObj.type === 'array') {
-      return this.handleArray(schemaObj as OpenAPIV3.ArraySchemaObject, registry);
+      return this.handleArray(schemaObj as OpenAPIV3.ArraySchemaObject, registry, context);
     }
 
     // 5. Objects / Dictionaries / Maps
     if (schemaObj.type === 'object') {
-      return this.handleObject(schemaObj, registry);
+      return this.handleObject(schemaObj, registry, context);
     }
 
     // 6. Primitives (String, Number, Boolean, Enums)
     if (this.isPrimitiveType(schemaObj.type)) {
-      return this.handlePrimitive(schemaObj);
+      return this.handlePrimitive(schemaObj, context);
     }
 
     // Fallback
@@ -158,12 +160,13 @@ export class TypeMapper {
   private static handleArray(
     schema: OpenAPIV3.ArraySchemaObject,
     registry: Map<string, IrModel>,
+    context?: { isRequestBody?: boolean; contentType?: string },
   ): IrType {
     if (!schema.items) {
       return { rawType: 'any[]', isArray: true, isPrimitive: false };
     }
 
-    const itemType = this.map(schema.items, registry);
+    const itemType = this.map(schema.items, registry, context);
 
     return {
       rawType: itemType.rawType,
@@ -176,6 +179,7 @@ export class TypeMapper {
   private static handleObject(
     schema: OpenAPIV3.SchemaObject,
     registry: Map<string, IrModel>,
+    context?: { isRequestBody?: boolean; contentType?: string },
   ): IrType {
     // Handle 'additionalProperties' which translates to TypeScript Record<string, T>
     if (schema.additionalProperties) {
@@ -184,7 +188,7 @@ export class TypeMapper {
       }
 
       if (typeof schema.additionalProperties === 'object') {
-        const valueType = this.map(schema.additionalProperties, registry);
+        const valueType = this.map(schema.additionalProperties, registry, context);
         // If the value type is complex (e.g. array or union), simple string interpolation might be tricky,
         // but for now strict rawType usage is assumed sufficient.
         const valueTypeName = Array.isArray(valueType.rawType)
@@ -199,11 +203,42 @@ export class TypeMapper {
       }
     }
 
+    // Special case: multipart/form-data request body with properties
+    // Generate inline type like { fieldName?: Type }
+    if (
+      context?.isRequestBody &&
+      context?.contentType?.includes('multipart/form-data') &&
+      schema.properties
+    ) {
+      const fields: string[] = [];
+      const required = schema.required || [];
+
+      for (const [propName, propSchema] of Object.entries(schema.properties)) {
+        const isRequired = required.includes(propName);
+        const propType = this.map(propSchema, registry, context);
+        const propTypeName = Array.isArray(propType.rawType)
+          ? propType.rawType.join(' | ')
+          : propType.rawType;
+
+        const optional = isRequired ? '' : '?';
+        fields.push(`${propName}${optional}: ${propTypeName}`);
+      }
+
+      return {
+        rawType: `{ ${fields.join('; ')} }`,
+        isArray: false,
+        isPrimitive: false,
+      };
+    }
+
     // Generic object without specific properties definition
     return { rawType: 'any', isArray: false, isPrimitive: true };
   }
 
-  private static handlePrimitive(schema: OpenAPIV3.SchemaObject): IrType {
+  private static handlePrimitive(
+    schema: OpenAPIV3.SchemaObject,
+    context?: { isRequestBody?: boolean; contentType?: string },
+  ): IrType {
     if (schema.type === 'string') {
       // 1. Enum Handling
       if (schema.enum) {
@@ -227,7 +262,12 @@ export class TypeMapper {
         case 'date-time':
           return { rawType: 'Date', isArray: false, isPrimitive: false };
         case 'binary':
-          return { rawType: 'Blob', isArray: false, isPrimitive: false };
+          // For multipart/form-data request bodies, use Buffer | ReadStream
+          // For response bodies (images, PDFs), use Buffer (Node.js)
+          if (context?.isRequestBody && context?.contentType?.includes('multipart/form-data')) {
+            return { rawType: 'Buffer | ReadStream', isArray: false, isPrimitive: false };
+          }
+          return { rawType: 'Buffer', isArray: false, isPrimitive: false };
       }
 
       return { rawType: 'string', isArray: false, isPrimitive: true };

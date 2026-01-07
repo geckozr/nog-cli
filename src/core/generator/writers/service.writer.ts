@@ -78,12 +78,18 @@ export class ServiceWriter {
       ],
     });
 
-    // Add Constructor with HttpService injection
+    // Add Constructor with HttpService and ApiConfiguration injection
     classDecl.addConstructor({
       parameters: [
         {
           name: 'httpService',
           type: 'HttpService',
+          scope: Scope.Private,
+          isReadonly: true,
+        },
+        {
+          name: 'config',
+          type: 'ApiConfiguration',
           scope: Scope.Private,
           isReadonly: true,
         },
@@ -103,6 +109,9 @@ export class ServiceWriter {
   /**
    * Adds the Observable-based method (suffix `$`) that issues the HTTP request.
    *
+   * Returns the full AxiosResponse which includes headers, status, and other HTTP metadata.
+   * Use this method when you need access to response headers or HTTP status information.
+   *
    * @param classDecl Target class declaration.
    * @param operation Operation metadata driving the signature and body.
    * @returns void
@@ -114,7 +123,7 @@ export class ServiceWriter {
       name: `${operation.methodName}$`,
       scope: Scope.Public,
       parameters,
-      returnType: `Observable<${returnType}>`,
+      returnType: `Observable<AxiosResponse<${returnType}>>`,
       docs: operation.description ? [{ description: operation.description }] : undefined,
     });
 
@@ -123,6 +132,9 @@ export class ServiceWriter {
 
   /**
    * Adds the Promise-based convenience method delegating to the Observable sibling via `firstValueFrom`.
+   *
+   * Automatically extracts the response data, providing convenient access to just the response body.
+   * Use this method for simple async/await patterns when you only need the response data.
    *
    * @param classDecl Target class declaration.
    * @param operation Operation metadata driving the signature and body.
@@ -139,14 +151,17 @@ export class ServiceWriter {
       docs: operation.description ? [{ description: operation.description }] : undefined,
     });
 
-    method.setBodyText((writer) => {
-      const args = parameters.map((p) => p.name).join(', ');
-      writer.writeLine(`return firstValueFrom(this.${operation.methodName}$(${args}));`);
-    });
+    this.generatePromiseMethodBody(method, operation);
   }
 
   /**
-   * Prepares method parameters and return type, ordering required parameters before optional ones.
+   * Prepares method parameters and return type.
+   *
+   * Parameter grouping strategy (TypeScript requires required params before optional):
+   * 1. Required body parameter (if exists)
+   * 2. Required path parameters as individual arguments
+   * 3. Optional body parameter (if exists)
+   * 4. Params object (groups optional path, query, and header parameters - always optional)
    *
    * @param operation Operation metadata containing parameters and return type.
    * @returns Method signature details for ts-morph.
@@ -155,21 +170,74 @@ export class ServiceWriter {
     parameters: { name: string; type: string; hasQuestionToken: boolean }[];
     returnType: string;
   } {
-    const requiredParams = operation.parameters.filter((p) => p.isRequired);
-    const optionalParams = operation.parameters.filter((p) => !p.isRequired);
+    const pathParams = operation.parameters.filter((p) => p.in === 'path');
+    const bodyParams = operation.parameters.filter((p) => p.in === 'body');
+    const queryParams = operation.parameters.filter((p) => p.in === 'query');
+    const headerParams = operation.parameters.filter((p) => p.in === 'header');
 
-    const parameters = [
-      ...requiredParams.map((p) => ({
+    const parameters: { name: string; type: string; hasQuestionToken: boolean }[] = [];
+
+    // Separate required and optional body params
+    const requiredBodyParams = bodyParams.filter((p) => p.isRequired);
+    const optionalBodyParams = bodyParams.filter((p) => !p.isRequired);
+
+    // 1. Required body parameter (must come before optional params)
+    parameters.push(
+      ...requiredBodyParams.map((p) => ({
         name: p.name,
         type: TypeHelper.irTypeToString(p.type),
         hasQuestionToken: false,
       })),
-      ...optionalParams.map((p) => ({
+    );
+
+    // 2. Required path parameters as individual arguments
+    const requiredPathParams = pathParams.filter((p) => p.isRequired);
+    parameters.push(
+      ...requiredPathParams.map((p) => ({
+        name: p.name,
+        type: TypeHelper.irTypeToString(p.type),
+        hasQuestionToken: false,
+      })),
+    );
+
+    // 3. Optional body parameter (after all required params)
+    parameters.push(
+      ...optionalBodyParams.map((p) => ({
         name: p.name,
         type: TypeHelper.irTypeToString(p.type),
         hasQuestionToken: true,
       })),
-    ];
+    );
+
+    // 3. Params object: groups optional path params, all query, and all header parameters with inline JSDoc
+    const optionalPathParams = pathParams.filter((p) => !p.isRequired);
+    const paramsObjectParams = [...optionalPathParams, ...queryParams, ...headerParams];
+
+    if (paramsObjectParams.length > 0) {
+      const paramsObjectProperties = paramsObjectParams
+        .map((p) => {
+          const type = TypeHelper.irTypeToString(p.type);
+          const optional = !p.isRequired ? '?' : '';
+
+          // Add JSDoc comment for the field if description exists
+          let fieldDef = '';
+          if (p.description) {
+            // Escape any */ sequences in description to prevent breaking JSDoc
+            const escapedDescription = p.description.replace(/\*\//g, '*\\/');
+            fieldDef = `\n    /** ${escapedDescription} */\n    ${p.name}${optional}: ${type}`;
+          } else {
+            fieldDef = `\n    ${p.name}${optional}: ${type}`;
+          }
+          return fieldDef;
+        })
+        .join(';');
+
+      parameters.push({
+        name: 'params',
+        type: `{${paramsObjectProperties};\n  }`,
+        hasQuestionToken: true,
+      });
+    }
 
     const returnType = TypeHelper.irTypeToString(operation.returnType);
 
@@ -185,61 +253,175 @@ export class ServiceWriter {
    */
   private generateMethodBody(method: MethodDeclaration, operation: IrOperation): void {
     method.setBodyText((writer) => {
+      const pathParams = operation.parameters.filter((p) => p.in === 'path');
       const queryParams = operation.parameters.filter((p) => p.in === 'query');
       const headerParams = operation.parameters.filter((p) => p.in === 'header');
       const bodyParam = operation.parameters.find((p) => p.in === 'body');
 
-      // 1. URL Construction
-      const urlTemplate = this.buildUrlTemplate(operation.path);
-      writer.writeLine(`const url = \`${urlTemplate}\`;`);
+      const requiredPathParams = pathParams.filter((p) => p.isRequired);
+      const optionalPathParams = pathParams.filter((p) => !p.isRequired);
 
-      // 2. Query Params
+      // 1. URL Construction - build path with interpolated path params
+      let urlTemplate = operation.path;
+
+      // Replace required path params (direct arguments)
+      for (const param of requiredPathParams) {
+        urlTemplate = urlTemplate.replace(`{${param.name}}`, `\${${param.name}}`);
+      }
+
+      // Replace optional path params (from params object)
+      for (const param of optionalPathParams) {
+        urlTemplate = urlTemplate.replace(`{${param.name}}`, `\${params?.${param.name}}`);
+      }
+
+      writer.writeLine("const normalizedBase = (this.config.baseUrl ?? '').replace(/\\/$/, '');");
+      writer.writeLine(`const normalizedPath = \`${urlTemplate}\`.replace(/^\\//, '');`);
+      writer.writeLine(
+        'const url = normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`;',
+      );
+
+      // 2. Query Params - extract from params object
       if (queryParams.length > 0) {
-        writer.writeLine('const params: Record<string, any> = {};');
-        for (const param of queryParams) {
-          // Add check to avoid sending undefined
-          writer.writeLine(
-            `if (${param.name} !== undefined) params['${param.name}'] = ${param.name};`,
-          );
+        writer.writeLine('const queryParams: Record<string, any> = {};');
+        writer.writeLine('if (params) {');
+        writer.indent(() => {
+          for (const param of queryParams) {
+            writer.writeLine(
+              `if (params.${param.name} !== undefined) queryParams['${param.name}'] = params.${param.name};`,
+            );
+          }
+        });
+        writer.writeLine('}');
+      }
+
+      // 3. Headers - merge global headers, content-type, accept, and custom headers
+      writer.writeLine(
+        'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
+      );
+
+      // Add Accept header if specified
+      if (operation.acceptHeader) {
+        writer.writeLine(`headers['Accept'] = '${operation.acceptHeader}';`);
+      }
+
+      // Add Content-Type header if specified (for multipart/form-data, etc)
+      if (operation.requestContentType && operation.requestContentType !== 'application/json') {
+        // For multipart/form-data, we'll let the browser/axios set it with boundaries
+        // For other types, set explicitly
+        if (operation.requestContentType !== 'multipart/form-data') {
+          writer.writeLine(`headers['Content-Type'] = '${operation.requestContentType}';`);
         }
       }
 
-      // 3. Headers
+      // Extract custom headers from params object
       if (headerParams.length > 0) {
-        writer.writeLine('const headers: Record<string, string> = {};');
-        for (const param of headerParams) {
-          writer.writeLine(
-            `if (${param.name} !== undefined) headers['${param.name}'] = String(${param.name});`,
-          );
-        }
+        writer.writeLine('if (params) {');
+        writer.indent(() => {
+          for (const param of headerParams) {
+            writer.writeLine(
+              `if (params['${param.name}'] !== undefined) headers['${param.name}'] = String(params['${param.name}']);`,
+            );
+          }
+        });
+        writer.writeLine('}');
       }
 
       // 4. HTTP Call
       const httpMethod = operation.method.toLowerCase();
       const returnType = TypeHelper.irTypeToString(operation.returnType);
+
+      // Build config object - spread httpOptions for Axios settings (timeout, etc.)
       const configParts: string[] = [];
 
-      if (queryParams.length > 0) configParts.push('params');
-      if (headerParams.length > 0) configParts.push('headers');
+      configParts.push('...this.config.httpOptions');
 
-      const configObj = configParts.length > 0 ? `{ ${configParts.join(', ')} }` : '';
+      if (queryParams.length > 0) {
+        configParts.push('params: queryParams');
+      }
+
+      configParts.push('headers');
+
+      // Add responseType for non-JSON responses
+      if (operation.responseType) {
+        configParts.push(`responseType: '${operation.responseType}'`);
+      }
+
+      const configObj = `{ ${configParts.join(', ')} }`;
 
       let httpCall = '';
       if (['get', 'delete', 'head', 'options'].includes(httpMethod)) {
         // Methods without body: (url, config)
-        httpCall = configObj
-          ? `this.httpService.${httpMethod}<${returnType}>(url, ${configObj})`
-          : `this.httpService.${httpMethod}<${returnType}>(url)`;
+        httpCall = `this.httpService.${httpMethod}<${returnType}>(url, ${configObj})`;
       } else {
         // Methods with body: (url, data, config)
-        const bodyArg = bodyParam ? bodyParam.name : 'undefined';
-        httpCall = configObj
-          ? `this.httpService.${httpMethod}<${returnType}>(url, ${bodyArg}, ${configObj})`
-          : `this.httpService.${httpMethod}<${returnType}>(url, ${bodyArg})`;
+        let bodyArg = bodyParam ? bodyParam.name : 'undefined';
+
+        // For multipart/form-data, convert body to FormData only if it exists
+        if (operation.requestContentType === 'multipart/form-data' && bodyParam) {
+          // Use conditional to avoid creating empty FormData when body is undefined
+          bodyArg = `${bodyParam.name} ? toFormData(${bodyParam.name}) : undefined`;
+        }
+
+        httpCall = `this.httpService.${httpMethod}<${returnType}>(url, ${bodyArg}, ${configObj})`;
       }
 
-      writer.writeLine(`return ${httpCall}.pipe(map((response) => response.data));`);
+      // Observable method returns full AxiosResponse (includes headers, status, etc.)
+      // This is the actual return line for the Observable method
+      writer.writeLine(`return ${httpCall};`);
     });
+  }
+
+  /**
+   * Wraps the Observable method with firstValueFrom and extracts the data.
+   * The Promise method allows convenient access to just the response data.
+   *
+   * @param method The Promise method declaration being populated.
+   * @param operation Operation metadata describing the HTTP call.
+   * @returns void
+   */
+  private generatePromiseMethodBody(method: MethodDeclaration, operation: IrOperation): void {
+    method.setBodyText((writer) => {
+      const args = this.buildMethodCallArguments(operation);
+      writer.writeLine(
+        `return firstValueFrom(this.${operation.methodName}$(${args})).then(response => response.data);`,
+      );
+    });
+  }
+
+  /**
+   * Builds the arguments list for calling the Observable method from the Promise wrapper.
+   *
+   * @param operation Operation metadata describing the HTTP call.
+   * @returns Comma-separated argument string.
+   */
+  private buildMethodCallArguments(operation: IrOperation): string {
+    const pathParams = operation.parameters.filter((p) => p.in === 'path');
+    const bodyParams = operation.parameters.filter((p) => p.in === 'body');
+    const queryParams = operation.parameters.filter((p) => p.in === 'query');
+    const headerParams = operation.parameters.filter((p) => p.in === 'header');
+
+    const args: string[] = [];
+
+    // Required body
+    const requiredBodyParams = bodyParams.filter((p) => p.isRequired);
+    args.push(...requiredBodyParams.map((p) => p.name));
+
+    // Required path params
+    const requiredPathParams = pathParams.filter((p) => p.isRequired);
+    args.push(...requiredPathParams.map((p) => p.name));
+
+    // Optional body or params object (if any exist)
+    const optionalBodyParams = bodyParams.filter((p) => !p.isRequired);
+    if (optionalBodyParams.length > 0) {
+      args.push(...optionalBodyParams.map((p) => p.name));
+    }
+
+    const optionalPathParams = pathParams.filter((p) => !p.isRequired);
+    if (optionalPathParams.length > 0 || queryParams.length > 0 || headerParams.length > 0) {
+      args.push('params');
+    }
+
+    return args.join(', ');
   }
 
   /**

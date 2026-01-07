@@ -265,6 +265,7 @@ export class OpenApiConverter {
       if (!successRes) return; // Skip if no 2xx or default response
 
       const operationId = op.operationId || generateOperationId(method, path);
+      const { parameters, requestContentType } = this.extractParameters(op, pathItem);
 
       // 3. Handle void/empty response
       if (!successRes.response.content || Object.keys(successRes.response.content).length === 0) {
@@ -274,8 +275,9 @@ export class OpenApiConverter {
           path,
           method,
           description: op.description,
-          parameters: this.extractParameters(op, pathItem),
+          parameters,
           returnType: { rawType: 'void', isArray: false, isPrimitive: true },
+          requestContentType,
         });
         return;
       }
@@ -292,6 +294,8 @@ export class OpenApiConverter {
           : toCamelCase(operationId);
 
         const returnType = this.extractReturnType(mediaType.schema);
+        const acceptHeader = contentType;
+        const responseType = this.determineResponseType(contentType);
 
         this.addOperationToService(service, {
           operationId,
@@ -299,8 +303,11 @@ export class OpenApiConverter {
           path,
           method,
           description: op.description,
-          parameters: this.extractParameters(op, pathItem),
+          parameters,
           returnType,
+          requestContentType,
+          acceptHeader,
+          responseType,
         });
       }
     });
@@ -316,6 +323,9 @@ export class OpenApiConverter {
       description?: string;
       parameters: IrParameter[];
       returnType: IrType;
+      requestContentType?: string;
+      acceptHeader?: string;
+      responseType?: 'text' | 'blob' | 'arraybuffer';
     },
   ): void {
     const finalMethodName = this.resolveMethodNameCollision(
@@ -335,6 +345,9 @@ export class OpenApiConverter {
       description: params.description,
       parameters: params.parameters,
       returnType: params.returnType,
+      requestContentType: params.requestContentType,
+      acceptHeader: params.acceptHeader,
+      responseType: params.responseType,
     });
   }
 
@@ -450,9 +463,10 @@ export class OpenApiConverter {
   private extractParameters(
     operation: OpenAPIV3.OperationObject,
     pathItem: OpenAPIV3.PathItemObject,
-  ): IrParameter[] {
+  ): { parameters: IrParameter[]; requestContentType?: string } {
     const parameters: IrParameter[] = [];
     const allParams = [...(pathItem.parameters || []), ...(operation.parameters || [])];
+    let requestContentType: string | undefined;
 
     for (const param of allParams) {
       let paramObj: OpenAPIV3.ParameterObject;
@@ -476,31 +490,38 @@ export class OpenApiConverter {
           : { rawType: 'any', isArray: false, isPrimitive: true },
         in: paramObj.in as 'query' | 'path' | 'header',
         isRequired: paramObj.required || paramObj.in === 'path',
+        description: paramObj.description,
       });
     }
 
     // Handle Request Body
     if (operation.requestBody) {
-      this.extractRequestBody(operation.requestBody, parameters);
+      requestContentType = this.extractRequestBody(operation.requestBody, parameters);
     }
 
-    return parameters;
+    return { parameters, requestContentType };
   }
 
   private extractRequestBody(
     requestBody: OpenAPIV3.RequestBodyObject | OpenAPIV3.ReferenceObject,
     parameters: IrParameter[],
-  ): void {
+  ): string | undefined {
     if ('$ref' in requestBody) {
       // TODO: Resolve requestBody refs if strictly needed, usually body structure is inline or points to schema ref
-      return;
+      return undefined;
     }
 
     const bodyObj = requestBody as OpenAPIV3.RequestBodyObject;
-    const content = bodyObj.content['application/json'] || Object.values(bodyObj.content)[0];
+    // Get first available content type
+    const contentType = Object.keys(bodyObj.content)[0];
+    const content = bodyObj.content[contentType];
 
     if (content?.schema) {
-      const bodyType = TypeMapper.map(content.schema, this.modelsRegistry);
+      // Pass context to TypeMapper so binary fields map to Buffer | ReadStream for multipart
+      const bodyType = TypeMapper.map(content.schema, this.modelsRegistry, {
+        isRequestBody: true,
+        contentType,
+      });
       parameters.push({
         name: 'body',
         type: bodyType,
@@ -508,6 +529,8 @@ export class OpenApiConverter {
         isRequired: bodyObj.required || false,
       });
     }
+
+    return contentType;
   }
 
   private resolveParameterRef(ref: string): OpenAPIV3.ParameterObject | null {
@@ -521,5 +544,24 @@ export class OpenApiConverter {
       return this.resolveParameterRef(paramDef.$ref);
     }
     return paramDef as OpenAPIV3.ParameterObject;
+  }
+
+  /**
+   * Determines the Axios responseType based on the content-type.
+   */
+  private determineResponseType(contentType: string): 'text' | 'blob' | 'arraybuffer' | undefined {
+    if (contentType.startsWith('text/')) {
+      return 'text';
+    }
+    if (
+      contentType.startsWith('image/') ||
+      contentType.startsWith('application/pdf') ||
+      contentType.startsWith('application/octet-stream') ||
+      contentType.includes('binary')
+    ) {
+      return 'arraybuffer';
+    }
+    // application/json and others default to undefined (JSON parsing)
+    return undefined;
   }
 }

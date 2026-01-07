@@ -80,6 +80,29 @@ npm run test:coverage
 
 **Coverage Requirement:** Greater than 90% line coverage. Pull requests must maintain or improve coverage.
 
+## How to Add a New Feature
+
+### Scenario A: Support a New Validation Rule (e.g., @Max(100))
+
+1. **Modify IR**: Update `IrValidator` in `src/core/ir/models.ts` to include the new validator type (e.g., `'MAX'`).
+2. **Update Mapper**: In `src/core/ir/analyzer/type.mapper.ts`, extract the `maximum` field from the OpenAPI schema and push a `'MAX'` validator to the list.
+3. **Update Generator**: In `src/core/generator/writers/dto.writer.ts`, read the `'MAX'` validator from the IR and add the `@Max()` decorator to the class property using `ts-morph`.
+4. **Add Tests**: Write unit tests for the mapper and generator, plus an E2E test with a fixture.
+
+### Scenario B: Change How Services Are Generated
+
+1. **Modify Generator**: Edit `src/core/generator/writers/service.writer.ts`.
+2. **Do NOT Touch IR**: Unless you need data that isn't currently extracted from the OpenAPI spec.
+3. **Add Tests**: Update service.writer.spec.ts with new test cases.
+
+### Scenario C: Support a New OpenAPI Feature
+
+1. **Update Parser** (if needed): Modify `src/core/parser/openapi.parser.ts` to extract new data.
+2. **Extend IR**: Add new fields to `IrOperation`, `IrModel`, or `IrService` in `src/core/ir/models.ts`.
+3. **Update Converter**: Modify `src/core/ir/converter.ts` to populate the new IR fields.
+4. **Update Generator**: Modify the appropriate writer to emit code based on the new IR data.
+5. **Add E2E Test**: Create a fixture in `test/fixtures/` and verify generated code compiles.
+
 ### Lint
 
 Check code for ESLint violations:
@@ -101,6 +124,40 @@ Format code using Prettier:
 ```bash
 npm run format
 ```
+
+## Coding Standards
+
+### Strict TypeScript
+
+- **No `any` type**: Use `unknown` if necessary and cast with type guards.
+- **Strict null checks**: Handle `undefined` and `null` explicitly.
+- **No unused variables**: Prefix unused args with `_` (e.g., `_sourceFile`) only if required by signature.
+
+### Code Generation
+
+- **AST over Strings**: Never build code using string templates (e.g., `` `export class ${name}` ``). Always use `ts-morph` methods (e.g., `sourceFile.addClass(...)`).
+- **Immutability**: The IR should be treated as immutable once passed to the Generator.
+
+### Naming Conventions
+
+- **Classes**: `PascalCase` (e.g., `GeneratorEngine`, `DtoWriter`)
+- **Files**: `kebab-case` (e.g., `dto.writer.ts`, `type.mapper.ts`)
+- **Methods/Properties**: `camelCase` (e.g., `generateDto`, `extractRecordValueType`)
+- **Interfaces**: `PascalCase` with `I` prefix for IR types (e.g., `IrModel`, `IrOperation`)
+
+### Documentation
+
+- **JSDoc Required**: All public methods must have JSDoc with `@param`, `@returns`, and `@example` (where applicable).
+- **Meaningful Comments Only**: Explain **WHY** something is done, not **WHAT** (the code shows what).
+- **No Emojis**: Professional, technical tone only.
+- **English Only**: All comments, docs, and commit messages must be in English.
+
+### Testing
+
+- **Unit Tests**: Located in `test/units/`. Test components in isolation with mocked dependencies.
+- **E2E Tests**: Located in `test/e2e/`. Run the full CLI against fixtures and verify the output compiles.
+- **Mock Naming**: Use strict naming (e.g., `projectMock`, `dtoWriterMock` - camelCase).
+- **Syntax Check**: E2E tests must validate generated code syntax using `ts-morph` (not just file existence).
 
 ## Code Standards
 

@@ -785,5 +785,170 @@ describe('DtoWriter', () => {
         expect(members).toEqual([]);
       });
     });
+
+    describe('Additional Coverage for Edge Cases', () => {
+      it('should handle type alias with subTypes (union types)', async () => {
+        const unionModel: IrModel = {
+          name: 'AnimalUnion',
+          fileName: 'animal-union',
+          isEnum: false,
+          properties: [],
+          subTypes: [{ name: 'Dog' }, { name: 'Cat' }],
+          discriminator: { propertyName: 'type', mapping: {} },
+        };
+
+        const dogModel: IrModel = {
+          name: 'Dog',
+          fileName: 'dog',
+          isEnum: false,
+          properties: [
+            {
+              name: 'bark',
+              type: { rawType: 'boolean' },
+              isOptional: false,
+              isReadonly: false,
+              validators: [],
+            },
+          ],
+        };
+
+        const catModel: IrModel = {
+          name: 'Cat',
+          fileName: 'cat',
+          isEnum: false,
+          properties: [
+            {
+              name: 'meow',
+              type: { rawType: 'boolean' },
+              isOptional: false,
+              isReadonly: false,
+              validators: [],
+            },
+          ],
+        };
+
+        const project = new Project({ useInMemoryFileSystem: true });
+        const writer = new DtoWriter(project, 'output', [dogModel, catModel]);
+        await writer.writeAll([unionModel, dogModel, catModel]);
+
+        const unionFile = project.getSourceFile('output/dto/animal-union.dto.ts');
+        expect(unionFile).toBeDefined();
+        const typeAlias = unionFile?.getTypeAlias('AnimalUnion');
+        expect(typeAlias).toBeDefined();
+        // Check imports exist for Dog and Cat
+        const imports = unionFile?.getImportDeclarations();
+        expect(imports?.some((imp) => imp.getModuleSpecifierValue().includes('dog'))).toBe(true);
+        expect(imports?.some((imp) => imp.getModuleSpecifierValue().includes('cat'))).toBe(true);
+      });
+
+      it('should handle type alias with subTypes referencing unknown models (fallback to kebab-case)', async () => {
+        const unionModel: IrModel = {
+          name: 'MysteryUnion',
+          fileName: 'mystery-union',
+          isEnum: false,
+          properties: [],
+          subTypes: [{ name: 'UnknownType' }],
+          discriminator: { propertyName: 'kind', mapping: {} },
+        };
+
+        const project = new Project({ useInMemoryFileSystem: true });
+        const writer = new DtoWriter(project, 'output', []);
+        await writer.writeAll([unionModel]);
+
+        const unionFile = project.getSourceFile('output/dto/mystery-union.dto.ts');
+        expect(unionFile).toBeDefined();
+        // Should import from kebab-case file name
+        const imports = unionFile?.getImportDeclarations();
+        const unknownImport = imports?.find((imp) =>
+          imp.getModuleSpecifierValue().includes('unknown-type'),
+        );
+        expect(unknownImport).toBeDefined();
+      });
+
+      it('should skip IsString decorator for string arrays', async () => {
+        const model: IrModel = {
+          name: 'TagsDto',
+          fileName: 'tags-dto',
+          isEnum: false,
+          properties: [
+            {
+              name: 'tags',
+              type: { rawType: 'string', isArray: true, isPrimitive: true },
+              isOptional: false,
+              isReadonly: false,
+              validators: [],
+            },
+          ],
+        };
+
+        const project = new Project({ useInMemoryFileSystem: true });
+        const writer = new DtoWriter(project, 'output', []);
+        await writer.writeAll([model]);
+
+        const file = project.getSourceFile('output/dto/tags-dto.dto.ts');
+        const cls = file?.getClass('TagsDto');
+        const prop = cls?.getProperty('tags');
+
+        // Should have @IsArray but NOT @IsString
+        expect(prop?.getDecorator('IsArray')).toBeDefined();
+        expect(prop?.getDecorator('IsString')).toBeUndefined();
+      });
+
+      it('should skip IsNumber decorator for number arrays', async () => {
+        const model: IrModel = {
+          name: 'ScoresDto',
+          fileName: 'scores-dto',
+          isEnum: false,
+          properties: [
+            {
+              name: 'scores',
+              type: { rawType: 'number', isArray: true, isPrimitive: true },
+              isOptional: false,
+              isReadonly: false,
+              validators: [],
+            },
+          ],
+        };
+
+        const project = new Project({ useInMemoryFileSystem: true });
+        const writer = new DtoWriter(project, 'output', []);
+        await writer.writeAll([model]);
+
+        const file = project.getSourceFile('output/dto/scores-dto.dto.ts');
+        const cls = file?.getClass('ScoresDto');
+        const prop = cls?.getProperty('scores');
+
+        expect(prop?.getDecorator('IsArray')).toBeDefined();
+        expect(prop?.getDecorator('IsNumber')).toBeUndefined();
+      });
+
+      it('should skip IsBoolean decorator for boolean arrays', async () => {
+        const model: IrModel = {
+          name: 'FlagsDto',
+          fileName: 'flags-dto',
+          isEnum: false,
+          properties: [
+            {
+              name: 'flags',
+              type: { rawType: 'boolean', isArray: true, isPrimitive: true },
+              isOptional: false,
+              isReadonly: false,
+              validators: [],
+            },
+          ],
+        };
+
+        const project = new Project({ useInMemoryFileSystem: true });
+        const writer = new DtoWriter(project, 'output', []);
+        await writer.writeAll([model]);
+
+        const file = project.getSourceFile('output/dto/flags-dto.dto.ts');
+        const cls = file?.getClass('FlagsDto');
+        const prop = cls?.getProperty('flags');
+
+        expect(prop?.getDecorator('IsArray')).toBeDefined();
+        expect(prop?.getDecorator('IsBoolean')).toBeUndefined();
+      });
+    });
   });
 });

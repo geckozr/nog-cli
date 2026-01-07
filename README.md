@@ -83,6 +83,27 @@ if (errors.length > 0) {
 }
 ```
 
+### 4. File Upload and Download
+
+The generated code automatically handles file uploads and downloads:
+
+```typescript
+import { createReadStream } from 'fs';
+
+import { FileService, UserService } from './generated/services';
+
+// Upload with multipart/form-data
+const avatar = createReadStream('./avatar.png');
+await userService.uploadAvatar({ avatar, description: 'Profile picture' });
+
+// Upload binary stream
+const document = createReadStream('./document.pdf');
+await fileService.uploadDocument(document);
+
+// Download binary file
+const pdfBlob = await fileService.downloadDocument('doc-123');
+```
+
 ## Command-Line Options
 
 ```

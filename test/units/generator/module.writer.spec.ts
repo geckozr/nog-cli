@@ -1,186 +1,202 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Project } from 'ts-morph';
+import { describe, expect, it } from 'vitest';
 
-import { TypeHelper } from '../../../src/core/generator/helpers/type.helper';
 import { ModuleWriter } from '../../../src/core/generator/writers/module.writer';
 import { IrDefinition } from '../../../src/core/ir/interfaces';
 
-// Mock helpers
-vi.mock('../../../src/core/generator/helpers/file-header.helper', () => ({
-  FileHeaderHelper: {
-    getHeader: () => '// Header',
-    addHeader: vi.fn(),
-  },
-}));
-
-// Mock TypeHelper factory
-vi.mock('../../../src/core/generator/helpers/type.helper', () => ({
-  TypeHelper: {
-    getFileName: vi.fn(),
-  },
-}));
-
 describe('ModuleWriter', () => {
-  let projectMock: any;
-  let sourceFileMock: any;
-  let classMock: any;
-  const outputDir = '/out';
+  const outputDir = '/tmp/test-module-writer';
 
-  beforeEach(() => {
-    classMock = {
-      addDecorator: vi.fn(),
-    };
-    sourceFileMock = {
-      addImportDeclaration: vi.fn(),
-      addClass: vi.fn().mockReturnValue(classMock),
-      formatText: vi.fn(),
-    };
-    projectMock = {
-      createSourceFile: vi.fn().mockReturnValue(sourceFileMock),
-    };
-
-    vi.clearAllMocks();
-
-    // Default mock behavior
-    vi.mocked(TypeHelper.getFileName).mockImplementation((name) => name.toLowerCase());
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it('should generate the module file with correct name', async () => {
-    const writer = new ModuleWriter(projectMock, outputDir, 'MySdkModule');
+  it('should generate all required files', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir, 'Api', 'Test Spec', '1.0.0');
     const ir: IrDefinition = { models: [], services: [] };
 
     await writer.write(ir);
 
-    expect(projectMock.createSourceFile).toHaveBeenCalledWith(
-      `${outputDir}/my-sdk-module.module.ts`,
-      '',
-      { overwrite: true },
-    );
+    const sourceFiles = project.getSourceFiles();
+    const filePaths = sourceFiles.map((f) => f.getFilePath());
+
+    expect(filePaths).toContain(`${outputDir}/api.types.ts`);
+    expect(filePaths).toContain(`${outputDir}/api.configuration.ts`);
+    expect(filePaths).toContain(`${outputDir}/api.utils.ts`);
+    expect(filePaths).toContain(`${outputDir}/api.module.ts`);
   });
 
-  it('should import standard NestJS modules', async () => {
-    const writer = new ModuleWriter(projectMock, outputDir);
+  it('should generate ApiModule class with @Module decorator', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
     const ir: IrDefinition = { models: [], services: [] };
 
     await writer.write(ir);
 
-    expect(sourceFileMock.addImportDeclaration).toHaveBeenCalledWith({
-      moduleSpecifier: '@nestjs/common',
-      namedImports: ['Module'],
-    });
-    expect(sourceFileMock.addImportDeclaration).toHaveBeenCalledWith({
-      moduleSpecifier: '@nestjs/axios',
-      namedImports: ['HttpModule'],
-    });
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    expect(moduleFile).toBeDefined();
+
+    const moduleClass = moduleFile?.getClass('ApiModule');
+    expect(moduleClass).toBeDefined();
+    expect(moduleClass?.getDecorator('Module')).toBeDefined();
   });
 
-  it('should import and register services', async () => {
-    const writer = new ModuleWriter(projectMock, outputDir);
+  it('should generate forRoot static method', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = {
+      models: [],
+      services: [{ name: 'UserService', operations: new Map() }],
+    };
+
+    await writer.write(ir);
+
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    const moduleClass = moduleFile?.getClass('ApiModule');
+    const forRootMethod = moduleClass?.getMethod('forRoot');
+
+    expect(forRootMethod).toBeDefined();
+    expect(forRootMethod?.isStatic()).toBe(true);
+    expect(forRootMethod?.getReturnType().getText()).toContain('DynamicModule');
+
+    const methodText = forRootMethod?.getBodyText();
+    expect(methodText).toContain('providers');
+    expect(methodText).toContain('ApiConfiguration');
+    expect(methodText).toContain('UserService');
+    expect(methodText).toContain('HttpModule.register');
+  });
+
+  it('should generate forRootAsync static method', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = {
+      models: [],
+      services: [{ name: 'AuthService', operations: new Map() }],
+    };
+
+    await writer.write(ir);
+
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    const moduleClass = moduleFile?.getClass('ApiModule');
+    const forRootAsyncMethod = moduleClass?.getMethod('forRootAsync');
+
+    expect(forRootAsyncMethod).toBeDefined();
+    expect(forRootAsyncMethod?.isStatic()).toBe(true);
+    expect(forRootAsyncMethod?.getReturnType().getText()).toContain('DynamicModule');
+
+    const methodText = forRootAsyncMethod?.getBodyText();
+    expect(methodText).toContain('createAsyncProviders');
+    expect(methodText).toContain('HttpModule.registerAsync');
+    expect(methodText).toContain('AuthService');
+  });
+
+  it('should generate createAsyncProviders helper function', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = { models: [], services: [] };
+
+    await writer.write(ir);
+
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    const createAsyncProvidersFunc = moduleFile?.getFunction('createAsyncProviders');
+
+    expect(createAsyncProvidersFunc).toBeDefined();
+    expect(createAsyncProvidersFunc?.isExported()).toBe(false);
+
+    const funcText = createAsyncProvidersFunc?.getBodyText();
+    expect(funcText).toContain('options.useFactory');
+    expect(funcText).toContain('options.useExisting');
+    expect(funcText).toContain('options.useClass');
+    expect(funcText).toContain('API_CONFIG');
+  });
+
+  it('should generate api.types.ts with required interfaces', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = { models: [], services: [] };
+
+    await writer.write(ir);
+
+    const typesFile = project.getSourceFile(`${outputDir}/api.types.ts`);
+    expect(typesFile).toBeDefined();
+
+    expect(typesFile?.getInterface('ApiModuleConfig')).toBeDefined();
+    expect(typesFile?.getInterface('ApiModuleConfigFactory')).toBeDefined();
+    expect(typesFile?.getInterface('ApiModuleAsyncConfig')).toBeDefined();
+    expect(typesFile?.getTypeAlias('ApiHeaders')).toBeDefined();
+    expect(typesFile?.getVariableDeclaration('API_CONFIG')).toBeDefined();
+  });
+
+  it('should generate api.configuration.ts with ApiConfiguration service', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = { models: [], services: [] };
+
+    await writer.write(ir);
+
+    const configFile = project.getSourceFile(`${outputDir}/api.configuration.ts`);
+    expect(configFile).toBeDefined();
+
+    const apiConfigClass = configFile?.getClass('ApiConfiguration');
+    expect(apiConfigClass).toBeDefined();
+    expect(apiConfigClass?.getDecorator('Injectable')).toBeDefined();
+    expect(apiConfigClass?.getConstructors()).toHaveLength(1);
+    expect(apiConfigClass?.getGetAccessor('baseUrl')).toBeDefined();
+    expect(apiConfigClass?.getGetAccessor('headers')).toBeDefined();
+  });
+
+  it('should generate api.utils.ts with toFormData function', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
+    const ir: IrDefinition = { models: [], services: [] };
+
+    await writer.write(ir);
+
+    const utilsFile = project.getSourceFile(`${outputDir}/api.utils.ts`);
+    expect(utilsFile).toBeDefined();
+
+    const funcText = utilsFile?.getFullText();
+    expect(funcText).toContain('toFormData');
+    expect(funcText).toContain('FormData');
+    expect(funcText).toContain('form-data');
+    expect(funcText).toContain('Readable');
+    expect(funcText).toContain('Buffer.isBuffer');
+  });
+
+  it('should use custom module name', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir, 'CustomSdk');
+    const ir: IrDefinition = { models: [], services: [] };
+
+    await writer.write(ir);
+
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    const moduleClass = moduleFile?.getClass('CustomSdkModule');
+    expect(moduleClass).toBeDefined();
+  });
+
+  it('should import and register all services', async () => {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const writer = new ModuleWriter(project, outputDir);
     const ir: IrDefinition = {
       models: [],
       services: [
         { name: 'UserService', operations: new Map() },
         { name: 'AuthService', operations: new Map() },
+        { name: 'ProductService', operations: new Map() },
       ],
     };
 
-    vi.mocked(TypeHelper.getFileName)
-      .mockReturnValueOnce('user-service')
-      .mockReturnValueOnce('auth-service');
-
     await writer.write(ir);
 
-    // Verify Imports
-    expect(sourceFileMock.addImportDeclaration).toHaveBeenCalledWith({
-      moduleSpecifier: './services/user-service.service',
-      namedImports: ['UserService'],
-    });
-    expect(sourceFileMock.addImportDeclaration).toHaveBeenCalledWith({
-      moduleSpecifier: './services/auth-service.service',
-      namedImports: ['AuthService'],
-    });
-
-    // Verify Module Class Definition
-    expect(sourceFileMock.addClass).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'ApiModule', // Default name (Api + Module suffix)
-        isExported: true,
-        decorators: expect.arrayContaining([expect.objectContaining({ name: 'Module' })]),
-      }),
+    const moduleFile = project.getSourceFile(`${outputDir}/api.module.ts`);
+    const imports = moduleFile?.getImportDeclarations();
+    const serviceImports = imports?.filter((imp) =>
+      imp.getModuleSpecifierValue().includes('./services/'),
     );
-  });
+    expect(serviceImports).toHaveLength(3);
 
-  it('should generate correct module metadata strings (imports, providers, exports)', async () => {
-    const writer = new ModuleWriter(projectMock, outputDir);
-    const ir: IrDefinition = {
-      models: [],
-      services: [
-        { name: 'UserService', operations: new Map() },
-        { name: 'AuthService', operations: new Map() },
-      ],
-    };
-
-    await writer.write(ir);
-
-    const addClassCall = sourceFileMock.addClass.mock.calls[0][0];
-    const moduleDecorator = addClassCall.decorators.find((d: any) => d.name === 'Module');
-
-    const writerCallback = moduleDecorator.arguments[0];
-
-    const writerMock = {
-      write: vi.fn(),
-      writeLine: vi.fn(),
-      newLine: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-
-    writerCallback(writerMock);
-
-    expect(writerMock.write).toHaveBeenCalledWith('imports: [HttpModule],');
-    expect(writerMock.write).toHaveBeenCalledWith('providers: [UserService, AuthService],');
-    expect(writerMock.write).toHaveBeenCalledWith('exports: [UserService, AuthService],');
-  });
-
-  it('should render module metadata callback output', async () => {
-    const writer = new ModuleWriter(projectMock, outputDir);
-    const ir: IrDefinition = {
-      models: [],
-      services: [{ name: 'SoloService', operations: new Map() }],
-    };
-
-    await writer.write(ir);
-
-    const addClassCall = sourceFileMock.addClass.mock.calls[0][0];
-    const moduleDecorator = addClassCall.decorators.find((d: any) => d.name === 'Module');
-    const writerCallback = moduleDecorator.arguments[0];
-
-    const chunks: string[] = [];
-    const writerMock = {
-      write: (text: string) => {
-        chunks.push(text);
-        return writerMock;
-      },
-      writeLine: (text: string) => {
-        chunks.push(`${text}\n`);
-        return writerMock;
-      },
-      newLine: () => {
-        chunks.push('\n');
-        return writerMock;
-      },
-      indent: (cb: () => void) => cb(),
-    };
-
-    writerCallback(writerMock);
-
-    const rendered = chunks.join('');
-    expect(rendered).toContain('{');
-    expect(rendered).toContain('imports: [HttpModule],');
-    expect(rendered).toContain('providers: [SoloService],');
-    expect(rendered).toContain('exports: [SoloService],');
-    expect(rendered.trim().endsWith('}')).toBe(true);
+    const forRootMethod = moduleFile?.getClass('ApiModule')?.getMethod('forRoot');
+    const methodText = forRootMethod?.getBodyText();
+    expect(methodText).toContain('UserService');
+    expect(methodText).toContain('AuthService');
+    expect(methodText).toContain('ProductService');
   });
 });

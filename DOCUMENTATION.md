@@ -5,9 +5,10 @@
 1. [High-Level Architecture](#high-level-architecture)
 2. [Data Flow Pipeline](#data-flow-pipeline)
 3. [Core Concepts](#core-concepts)
-4. [Design Decisions](#design-decisions)
-5. [Directory Structure](#directory-structure)
-6. [Development Patterns](#development-patterns)
+4. [Directory Structure](#directory-structure)
+5. [Design Decisions](#design-decisions)
+6. [Generated Code Structure](#generated-code-structure)
+7. [Development Patterns](#development-patterns)
 
 ## High-Level Architecture
 
@@ -31,6 +32,14 @@ This architecture provides several benefits:
 - **Testability**: Each stage can be tested independently.
 - **Extensibility**: New output formats can be added by implementing new generators without modifying the parser or IR.
 - **Framework Agnosticism**: The IR is not tied to NestJS, allowing future support for other frameworks.
+
+**Note for AI Agents**: This project follows a strict Compiler Design Pattern. Do not modify files ad-hoc. Follow the data flow: Parser → IR → Generator.
+
+**Key Principles:**
+
+- **Parser**: MUST NOT perform business logic transformations
+- **IR**: MUST contain all data needed for generation (Generator NEVER accesses raw OpenAPI)
+- **Generator**: MUST use ts-morph AST manipulation (NO string concatenation for code)
 
 ## Data Flow Pipeline
 
@@ -95,6 +104,18 @@ The generator consumes the IR and emits TypeScript code using the `ts-morph` lib
 
 ## Core Concepts
 
+### Handling Circular Dependencies (Two-Pass Algorithm)
+
+OpenAPI schemas often contain circular references (e.g., `User` → `Post` → `User`). To handle this without infinite loops during parsing, `OpenApiConverter` uses a **Two-Pass Algorithm**:
+
+**Pass 1 (Discovery)**: Iterate through all schemas and create "Empty Shells" (instances of `IrModel` with just the name) in the `modelsRegistry`.
+
+- Result: `UserDto` and `PostDto` exist in memory, but have no properties.
+
+**Pass 2 (Population)**: Iterate again and populate properties. When `UserDto` needs `PostDto`, it looks it up in the registry. Since `PostDto` already exists (created in Pass 1), the reference is resolved successfully.
+
+This ensures all circular references are properly resolved without stack overflow errors.
+
 ### Pure OneOf vs. Hybrid OneOf
 
 The generator distinguishes between two types of union schemas:
@@ -148,6 +169,91 @@ public getUserById$(id: string): Observable<UserDto> {
   );
 }
 ```
+
+### File Upload and Download Support
+
+The generator provides comprehensive support for file uploads and downloads with proper type mapping:
+
+#### Multipart Form Data Uploads
+
+For `multipart/form-data` requests, binary fields are typed as `Buffer | ReadStream`:
+
+```typescript
+// OpenAPI Spec
+requestBody:
+  content:
+    multipart/form-data:
+      schema:
+        type: object
+        properties:
+          avatar:
+            type: string
+            format: binary
+          description:
+            type: string
+
+// Generated Method
+uploadAvatar$(body?: { avatar?: Buffer | ReadStream; description?: string }): Observable<void>
+```
+
+#### Binary Stream Uploads
+
+For `application/octet-stream` requests, the body is typed as `Buffer | ReadStream`:
+
+```typescript
+// OpenAPI Spec
+requestBody:
+  content:
+    application/octet-stream:
+      schema:
+        type: string
+        format: binary
+
+// Generated Method
+uploadDocument$(body?: Buffer | ReadStream): Observable<void>
+```
+
+#### Binary Downloads
+
+For binary responses (images, PDFs, etc.), the return type is `Blob` with appropriate `responseType`:
+
+```typescript
+// OpenAPI Spec
+responses:
+  '200':
+    content:
+      application/pdf:
+        schema:
+          type: string
+          format: binary
+
+// Generated Method
+downloadFile$(fileId: string): Observable<Blob>
+```
+
+**Request/Response Metadata Handling:**
+
+The converter automatically extracts and applies HTTP metadata:
+
+- **requestContentType**: Extracted from `requestBody.content` media type
+  - `application/json`: Default, no explicit header
+  - `multipart/form-data`: Axios sets boundary automatically
+  - `application/octet-stream`, `text/plain`: Explicit Content-Type header
+
+- **acceptHeader**: Extracted from `responses[200].content` media types
+  - Generates appropriate `Accept` header in requests
+  - Example: `Accept: image/png` for image responses
+
+- **responseType**: Axios configuration for non-JSON responses
+  - `'text'` for `text/*` content types
+  - `'blob'` for `image/*`, `application/pdf`, `application/octet-stream`
+  - `'arraybuffer'` for other binary types
+
+**Context-Aware Binary Type Mapping:**
+
+- Request body binary with `multipart/form-data` → `Buffer | ReadStream`
+- Response body binary → `Blob`
+- This distinction allows proper handling of Node.js streams for uploads and browser-compatible Blobs for downloads
 
 Advantage: Reactive programming, powerful operators (map, filter, switchMap, etc.).
 
@@ -220,43 +326,44 @@ This separation enables:
 
 ## Directory Structure
 
+The project follows the three-stage compiler pattern:
+
 ```
 src/
-├── cli/                          # User Interface Layer (Commander.js)
-│   ├── commands/
-│   │   └── generate.command.ts   # Generate command logic
-│   ├── types.ts                  # CLI configuration interfaces
-│   └── program.ts                # CLI program setup
-│
-├── core/                         # Compiler Core
-│   ├── parser/
-│   │   └── openapi.parser.ts     # Stage 1: Parse OpenAPI
-│   │
-│   ├── ir/
+├── cli/                  # UI Layer (Commander.js)
+│   ├── commands/         # Command logic (e.g., generate.command.ts)
+│   ├── options.ts        # CLI Flags definition
+│   └── program.ts        # CLI entry point
+├── config/               # Configuration Loading
+│   └── config.loader.ts  # Merges CLI flags with nog.config.json
+├── core/                 # THE COMPILER CORE
+│   ├── parser/           # [Layer 1] Input Processing
+│   │   ├── spec.loader.ts       # I/O: FileSystem & HTTP loading
+│   │   └── openapi.parser.ts    # Parsing & Bundle via swagger-parser
+│   ├── ir/               # [Layer 2] Intermediate Representation
 │   │   ├── interfaces/
-│   │   │   └── models.ts         # IR type definitions
-│   │   ├── analyzer/
-│   │   │   ├── type.mapper.ts    # Maps OpenAPI types to IR types
-│   │   │   └── schema.merger.ts  # Merges allOf schemas
-│   │   └── openapi.converter.ts  # Stage 2: Convert to IR
-│   │
-│   └── generator/
-│       ├── engine.ts             # Stage 3: Orchestrator
-│       ├── writers/
-│       │   ├── dto.writer.ts     # Emit DTOs and Enums
-│       │   ├── service.writer.ts # Emit NestJS Services
-│       │   ├── module.writer.ts  # Emit NestJS Module
-│       │   └── index.writer.ts   # Emit barrel exports
-│       └── helpers/
-│           ├── type.helper.ts    # Type conversion utilities
-│           ├── import.helper.ts  # Import statement generation
-│           ├── decorator.helper.ts # Decorator application
-│           └── file-header.helper.ts # Generated file headers
-│
-└── utils/
-    ├── logger.ts                 # Logging utilities
-    ├── naming.ts                 # Case conversion (camelCase, PascalCase, etc.)
-    └── index.ts                  # Public exports
+│   │   │   └── models.ts        # TYPES ONLY: Defines IrModel, IrService
+│   │   ├── analyzer/            # Helpers for type mapping & analysis
+│   │   │   ├── type.mapper.ts   # Maps OpenAPI types to IR types
+│   │   │   ├── validator.map.ts # Maps constraints to class-validator
+│   │   │   └── schema.merger.ts # Handles allOf, oneOf, anyOf
+│   │   └── openapi.converter.ts # LOGIC: OpenAPI -> IR Transformer
+│   └── generator/        # [Layer 3] Code Emission (ts-morph)
+│       ├── engine.ts            # Main orchestrator (FileSystem writes)
+│       ├── helpers/             # Reusable code generation utilities
+│       │   ├── type.helper.ts
+│       │   ├── import.helper.ts
+│       │   ├── decorator.helper.ts
+│       │   └── file-header.helper.ts
+│       └── writers/             # Logic for writing specific file types
+│           ├── dto.writer.ts    # Writes *.dto.ts
+│           ├── service.writer.ts # Writes *.service.ts
+│           ├── module.writer.ts  # Writes *.module.ts
+│           └── index.writer.ts   # Writes index.ts
+└── utils/                # Shared utilities (Logger, Naming, FS)
+    ├── logger.ts
+    ├── naming.ts
+    └── index.ts
 
 test/
 ├── e2e/

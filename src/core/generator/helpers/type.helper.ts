@@ -60,26 +60,44 @@ export class TypeHelper {
       return true;
     }
 
-    // 2. Handle generic Records (starts with Record<)
+    // 2. Handle inline object types (e.g., { image?: Buffer | ReadStream })
+    // These are anonymous types, not DTOs, so no import needed
+    if (typeof raw === 'string' && raw.trim().startsWith('{')) {
+      return false;
+    }
+
+    // 3. Handle generic Records (starts with Record<)
     // The Record itself is global, the value type inside might need import (handled by ImportHelper)
     if (typeof raw === 'string' && raw.startsWith('Record<')) {
       return false;
     }
 
-    // 3. Handle Built-in Types (Date, Blob, void, any)
+    // 4. Handle Built-in Types (Date, Blob, void, any, Buffer, ReadStream)
     // These might be marked as isPrimitive: false in the IR, so we check rawType directly.
-    if (['Date', 'Blob', 'void', 'any'].includes(raw as string)) {
-      return false;
+    if (typeof raw === 'string') {
+      const builtInTypes = ['Date', 'Blob', 'void', 'any', 'Buffer', 'ReadStream'];
+      // Also handle union types containing built-in types like "Buffer | ReadStream"
+      const types = raw.split('|').map((t) => t.trim());
+      if (types.every((t) => builtInTypes.includes(t))) {
+        return false;
+      }
     }
 
-    // 4. Default rule: If it's not primitive (and not caught above), it needs an import.
+    // 5. Default rule: If it's not primitive (and not caught above), it needs an import.
     return !type.isPrimitive;
   }
 
   /**
-   * Estrae il tipo del valore da un Record<K, V>
-   * @example 'Record<string, UserRecords>' -> 'UserRecords'
-   * @example 'Record<string, string>' -> 'string'
+   * Extracts the value type from a Record<K, V> generic type.
+   *
+   * @param rawType - The raw Record type string to parse.
+   * @returns The extracted value type, or null if parsing fails.
+   * @example
+   * ```typescript
+   * extractRecordValueType('Record<string, UserRecords>') // Returns: 'UserRecords'
+   * extractRecordValueType('Record<string, string>') // Returns: 'string'
+   * extractRecordValueType('InvalidType') // Returns: null
+   * ```
    */
   static extractRecordValueType(rawType: string): string | null {
     const match = rawType.match(/^Record<.+,\s*(.+)>$/);

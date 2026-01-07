@@ -8,7 +8,12 @@ import { IrValidator } from '../../ir/interfaces';
  */
 export class DecoratorHelper {
   /**
-   * Mappa i validatori IR ai decoratori class-validator
+   * Maps internal validation rule types to their corresponding class-validator decorator names.
+   *
+   * This registry ensures consistent translation from OpenAPI validation constraints
+   * to TypeScript decorator syntax compatible with NestJS validation pipes.
+   *
+   * @internal
    */
   private static readonly VALIDATOR_MAP: Record<string, string> = {
     IS_EMAIL: 'IsEmail',

@@ -78,6 +78,31 @@ export interface IrOperation {
    * Used to generate JSDoc comments for the method.
    */
   description?: string;
+
+  /**
+   * The content-type of the request body.
+   * Used to generate proper headers for multipart/form-data, application/json, etc.
+   * @example 'multipart/form-data'
+   * @example 'application/json'
+   */
+  requestContentType?: string;
+
+  /**
+   * The Accept header value based on the response content-type.
+   * Used to tell the server what content type the client expects.
+   * @example 'text/plain'
+   * @example 'image/png'
+   * @example 'application/pdf'
+   */
+  acceptHeader?: string;
+
+  /**
+   * The Axios responseType for non-JSON responses.
+   * @example 'text' for text/plain
+   * @example 'blob' for binary data (images, PDFs, etc)
+   * @example 'arraybuffer' for raw binary
+   */
+  responseType?: 'text' | 'blob' | 'arraybuffer';
 }
 
 /**
@@ -116,4 +141,10 @@ export interface IrParameter {
    * @example Optional query param: `listUsers(limit?: number)`
    */
   isRequired: boolean;
+
+  /**
+   * Optional description from the OpenAPI parameter.
+   * Used to generate JSDoc comments for individual parameters in the params object.
+   */
+  description?: string;
 }
