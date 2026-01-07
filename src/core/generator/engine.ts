@@ -6,6 +6,7 @@ import { DtoWriter } from './writers/dto.writer';
 import { IndexWriter } from './writers/index.writer';
 import { ModuleWriter } from './writers/module.writer';
 import { ServiceWriter } from './writers/service.writer';
+import { UsageWriter } from './writers/usage.writer';
 
 /**
  * Optional configuration for the Generator Engine.
@@ -116,7 +117,12 @@ export class GeneratorEngine {
       const indexWriter = new IndexWriter(this.project, this.outputDir, specTitle, specVersion);
       await indexWriter.write(ir);
 
-      // 5. Save to Disk
+      // 5. Generate Usage Documentation
+      Logger.info('Generating usage documentation...');
+      const usageWriter = new UsageWriter(this.project, this.outputDir, specTitle, specVersion);
+      await usageWriter.write(ir);
+
+      // 6. Save to Disk
       Logger.info('Writing files to disk...');
       await this.project.save();
 

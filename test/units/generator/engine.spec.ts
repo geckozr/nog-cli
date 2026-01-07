@@ -8,10 +8,12 @@ import { IrDefinition } from '../../../src/core/ir/interfaces/index';
  */
 const mocks = vi.hoisted(() => ({
   projectSave: vi.fn(),
+  projectCreateSourceFile: vi.fn(),
   dtoWriteAll: vi.fn(),
   serviceWriteAll: vi.fn(),
   moduleWrite: vi.fn(),
   indexWrite: vi.fn(),
+  usageWrite: vi.fn(),
   loggerInfo: vi.fn(),
   loggerError: vi.fn(),
 }));
@@ -24,6 +26,7 @@ vi.mock('ts-morph', () => {
     Project: vi.fn(function ProjectMock() {
       return {
         save: mocks.projectSave,
+        createSourceFile: mocks.projectCreateSourceFile,
       };
     }),
     IndentationText: { TwoSpaces: '  ' },
@@ -78,6 +81,17 @@ vi.mock('../../../src/core/generator/writers/index.writer', () => ({
 }));
 
 /**
+ * Mock UsageWriter with hoisted spy.
+ */
+vi.mock('../../../src/core/generator/writers/usage.writer', () => ({
+  UsageWriter: vi.fn(function UsageWriterMock() {
+    return {
+      write: mocks.usageWrite,
+    };
+  }),
+}));
+
+/**
  * Mock Logger with hoisted spies.
  */
 vi.mock('../../../src/utils/logger', () => ({
@@ -119,21 +133,24 @@ describe('GeneratorEngine', () => {
     expect(mocks.serviceWriteAll).toHaveBeenCalledWith(mockIr.services);
     expect(mocks.moduleWrite).toHaveBeenCalledWith(mockIr);
     expect(mocks.indexWrite).toHaveBeenCalledWith(mockIr);
+    expect(mocks.usageWrite).toHaveBeenCalledWith(mockIr);
     expect(mocks.projectSave).toHaveBeenCalled();
 
     /**
-     * Verify the order of execution: DTOs → Services → Module → Index → Save.
+     * Verify the order of execution: DTOs → Services → Module → Index → Usage → Save.
      */
     const dtoOrder = mocks.dtoWriteAll.mock.invocationCallOrder[0];
     const serviceOrder = mocks.serviceWriteAll.mock.invocationCallOrder[0];
     const moduleOrder = mocks.moduleWrite.mock.invocationCallOrder[0];
     const indexOrder = mocks.indexWrite.mock.invocationCallOrder[0];
+    const usageOrder = mocks.usageWrite.mock.invocationCallOrder[0];
     const saveOrder = mocks.projectSave.mock.invocationCallOrder[0];
 
     expect(dtoOrder).toBeLessThan(serviceOrder);
     expect(serviceOrder).toBeLessThan(moduleOrder);
     expect(moduleOrder).toBeLessThan(indexOrder);
-    expect(indexOrder).toBeLessThan(saveOrder);
+    expect(indexOrder).toBeLessThan(usageOrder);
+    expect(usageOrder).toBeLessThan(saveOrder);
   });
 
   it('should use custom module name from config', async () => {
