@@ -55,7 +55,9 @@ jobs:
 
       - name: Check test coverage threshold
         run: |
-          COVERAGE=$(cat coverage/coverage-final.json | jq '.total.lines.pct')
+          # Use coverage-summary.json which contains the .total object
+          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          echo "Current Coverage: $COVERAGE%"
           if (( $(echo "$COVERAGE < 90" | bc -l) )); then
             echo "Test coverage is $COVERAGE%, but threshold is 90%"
             exit 1
