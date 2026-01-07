@@ -1,6 +1,6 @@
 {
   "name": "@gecko_zr/nog-cli",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "nog-cli - NestJS OpenAPI Generator CLI: Generate NestJS services, interfaces and modules from OpenAPI specifications",
   "main": "dist/src/main.js",
   "bin": {
