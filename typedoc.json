@@ -1,0 +1,15 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/**/*.ts"],
+  "out": "docs",
+  "name": "Nog CLI Developer Guide",
+  "includeVersion": true,
+  "readme": "DOCUMENTATION.md",
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "excludeInternal": true,
+  "exclude": ["src/main.ts", "**/*.spec.ts", "**/*.test.ts", "**/index.ts"],
+  "gitRevision": "main",
+  "disableSources": false
+}

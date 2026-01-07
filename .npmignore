@@ -1,0 +1,40 @@
+# Source files (we publish only dist/)
+src/
+test/
+example/
+
+# Development files
+.github/
+.husky/
+.vscode/
+coverage/
+output/
+test-output/
+.vitest/
+
+# Configuration
+tsconfig.json
+vitest.config.ts
+eslint.config.mjs
+.prettierrc
+.prettierignore
+.gitignore
+
+# Documentation (keep only essential ones)
+REQUIREMENTS.md
+TEST_RESULTS.md
+CONTRIBUTING.md
+
+# Build artifacts
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# NPM
+node_modules/
+package-lock.json

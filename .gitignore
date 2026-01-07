@@ -1,0 +1,16 @@
+/node_modules
+/dist
+/docs
+/output
+/example
+coverage/
+.vitest/
+
+# Test and coverage
+/coverage
+/test-output
+/.vitest
+/.vscode
+
+# Husky
+/.husky/_

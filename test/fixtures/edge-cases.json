@@ -1,0 +1,456 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Edge Cases API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "tags": ["Items"],
+        "description": "Create a new item",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Item"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Item created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listItems",
+        "tags": ["Items"],
+        "responses": {
+          "200": {
+            "description": "List of items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Item"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "operationId": "getItem",
+        "tags": ["Items"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Item not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteItem",
+        "tags": ["Items"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Item deleted successfully"
+          }
+        }
+      }
+    },
+    "/items/search": {
+      "get": {
+        "operationId": "searchItems",
+        "tags": ["Items"],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Item"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/sync": {
+      "post": {
+        "operationId": "syncData",
+        "description": "Sync data without response content",
+        "responses": {
+          "202": {
+            "description": "Sync started"
+          }
+        }
+      }
+    },
+    "/export": {
+      "get": {
+        "operationId": "exportData",
+        "tags": ["Export"],
+        "description": "Export with multiple content types",
+        "responses": {
+          "200": {
+            "description": "Exported data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Item"
+                  }
+                }
+              },
+              "application/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/untagged-endpoint": {
+      "get": {
+        "operationId": "untaggedOperation",
+        "description": "Operation without tags",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{id}/rename": {
+      "post": {
+        "operationId": "renameItem",
+        "tags": ["Items"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "newName",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Item renamed"
+          }
+        }
+      }
+    },
+    "/with-default-response": {
+      "get": {
+        "operationId": "endpointWithDefault",
+        "description": "Endpoint with only default response",
+        "responses": {
+          "default": {
+            "description": "Default response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/process": {
+      "post": {
+        "operationId": "processData",
+        "tags": ["Admin"],
+        "description": "Process data - first operation",
+        "responses": {
+          "200": {
+            "description": "Processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/execute": {
+      "post": {
+        "operationId": "processData",
+        "tags": ["Admin"],
+        "description": "Process data - second operation causing collision",
+        "responses": {
+          "200": {
+            "description": "Executed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/handle": {
+      "post": {
+        "operationId": "processData",
+        "tags": ["Admin"],
+        "description": "Process data - third operation causing triple collision",
+        "responses": {
+          "200": {
+            "description": "Handled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/download": {
+      "get": {
+        "operationId": "getDocument",
+        "tags": ["Documents"],
+        "description": "Download document in various formats",
+        "responses": {
+          "200": {
+            "description": "Document content",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media/upload": {
+      "post": {
+        "operationId": "uploadMedia",
+        "tags": ["Media"],
+        "description": "Upload media file",
+        "responses": {
+          "200": {
+            "description": "Media uploaded",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/special/no-schema": {
+      "get": {
+        "operationId": "getNoSchema",
+        "tags": ["Special"],
+        "description": "Operation with content but no schema",
+        "responses": {
+          "200": {
+            "description": "Response without schema",
+            "content": {
+              "application/octet-stream": {}
+            }
+          }
+        }
+      }
+    },
+    "/html/generate": {
+      "get": {
+        "operationId": "generateHTML",
+        "tags": ["HTML"],
+        "description": "Generate HTML page",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/nonExistentParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML content",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Item": {
+        "type": "object",
+        "description": "An item in the system",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Item name"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "archived"]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "name"]
+      }
+    }
+  }
+}

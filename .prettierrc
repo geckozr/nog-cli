@@ -1,0 +1,19 @@
+{
+  "singleQuote": true,
+  "trailingComma": "all",
+  "tabWidth": 2,
+  "arrowParens": "always",
+  "printWidth": 100,
+  "semi": true,
+  "plugins": ["@trivago/prettier-plugin-sort-imports"],
+  "importOrder": [
+    "^node:",
+    "^@nestjs/",
+    "^@loopback/",
+    "^@apidevtools/",
+    "<THIRD_PARTY_MODULES>",
+    "^[./]"
+  ],
+  "importOrderSeparation": true,
+  "importOrderSortSpecifiers": true
+}

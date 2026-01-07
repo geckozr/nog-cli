@@ -1,0 +1,490 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Complex API - Comprehensive Test Coverage",
+    "description": "API with complex types: oneOf, allOf, unions, intersections, arrays, refs",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
+    }
+  ],
+  "paths": {
+    "/animals": {
+      "get": {
+        "summary": "List all animals (oneOf example)",
+        "operationId": "listAnimals",
+        "responses": {
+          "200": {
+            "description": "List of animals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      { "$ref": "#/components/schemas/Cat" },
+                      { "$ref": "#/components/schemas/Dog" },
+                      { "$ref": "#/components/schemas/Bird" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an animal",
+        "operationId": "createAnimal",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/Cat" },
+                  { "$ref": "#/components/schemas/Dog" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Animal created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Animal" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "summary": "Get user with profile (allOf example)",
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User with complete profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserProfile" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create user",
+        "operationId": "createUser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UserInput" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts": {
+      "get": {
+        "summary": "Get posts with authors and comments",
+        "operationId": "getPosts",
+        "responses": {
+          "200": {
+            "description": "List of posts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PostWithMetadata" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/content": {
+      "get": {
+        "summary": "Get polymorphic content",
+        "operationId": "getContent",
+        "responses": {
+          "200": {
+            "description": "Content of various types",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PolymorphicContent" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "summary": "Get user settings (intersection example)",
+        "operationId": "getSettings",
+        "responses": {
+          "200": {
+            "description": "User settings combining multiple concerns",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserSettings" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BaseEntity": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "createdAt", "updatedAt"]
+      },
+      "Animal": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["cat", "dog", "bird"] },
+          "name": { "type": "string" },
+          "age": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["id", "type", "name", "age"],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "cat": "#/components/schemas/Cat",
+            "dog": "#/components/schemas/Dog",
+            "bird": "#/components/schemas/Bird"
+          }
+        }
+      },
+      "Cat": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Animal" },
+          {
+            "type": "object",
+            "properties": {
+              "meowVolume": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "traits": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/IndoorTraits" },
+                  { "$ref": "#/components/schemas/OutdoorTraits" }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Dog": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Animal" },
+          {
+            "type": "object",
+            "properties": {
+              "barkVolume": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "traits": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/GuardDogTraits" },
+                  { "$ref": "#/components/schemas/CompanionDogTraits" }
+                ],
+                "discriminator": {
+                  "propertyName": "traitType",
+                  "mapping": {
+                    "guard": "#/components/schemas/GuardDogTraits",
+                    "companion": "#/components/schemas/CompanionDogTraits"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Bird": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Animal" },
+          {
+            "type": "object",
+            "properties": {
+              "wingspan": { "type": "number" },
+              "canFly": { "type": "boolean" }
+            }
+          }
+        ]
+      },
+      "IndoorTraits": {
+        "type": "object",
+        "properties": {
+          "indoorOnly": { "type": "boolean" },
+          "quietness": { "type": "integer", "minimum": 0, "maximum": 10 }
+        },
+        "required": ["indoorOnly"]
+      },
+      "OutdoorTraits": {
+        "type": "object",
+        "properties": {
+          "outdoorAdventurous": { "type": "boolean" },
+          "huntingSkill": { "type": "integer", "minimum": 0, "maximum": 10 }
+        },
+        "required": ["outdoorAdventurous"]
+      },
+      "GuardDogTraits": {
+        "type": "object",
+        "properties": {
+          "protectiveLevel": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "trainingLevel": { "type": "string", "enum": ["basic", "intermediate", "advanced"] }
+        },
+        "required": ["protectiveLevel"]
+      },
+      "CompanionDogTraits": {
+        "type": "object",
+        "properties": {
+          "affectionLevel": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "playfulness": { "type": "integer", "minimum": 0, "maximum": 10 }
+        },
+        "required": ["affectionLevel"]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "name": { "type": "string" },
+          "role": { "$ref": "#/components/schemas/UserRole" },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "suspended"]
+          }
+        },
+        "required": ["id", "email", "name", "role"]
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": ["admin", "user", "moderator"]
+      },
+      "AuditInfo": {
+        "type": "object",
+        "properties": {
+          "createdBy": { "type": "string" },
+          "modifiedBy": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "modifiedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["createdBy", "createdAt"]
+      },
+      "UserInput": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "name": { "type": "string" },
+          "password": { "type": "string", "minLength": 8 },
+          "role": { "$ref": "#/components/schemas/UserRole" }
+        },
+        "required": ["email", "name", "password"]
+      },
+      "UserProfile": {
+        "allOf": [
+          { "$ref": "#/components/schemas/User" },
+          { "$ref": "#/components/schemas/AuditInfo" },
+          {
+            "type": "object",
+            "properties": {
+              "bio": { "type": "string" },
+              "avatar": { "type": "string", "format": "uri" },
+              "preferences": { "$ref": "#/components/schemas/UserPreferences" }
+            }
+          }
+        ]
+      },
+      "UserPreferences": {
+        "type": "object",
+        "properties": {
+          "theme": { "type": "string", "enum": ["light", "dark", "auto"] },
+          "notifications": { "type": "boolean" },
+          "language": { "type": "string" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "Post": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"]
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["id", "title", "content", "status"]
+      },
+      "Comment": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "text": { "type": "string" },
+          "author": { "$ref": "#/components/schemas/User" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "replies": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Comment" }
+          }
+        },
+        "required": ["id", "text", "author", "createdAt"]
+      },
+      "PostWithMetadata": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Post" },
+          { "$ref": "#/components/schemas/AuditInfo" },
+          {
+            "type": "object",
+            "properties": {
+              "author": { "$ref": "#/components/schemas/User" },
+              "comments": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/Comment" }
+              },
+              "relatedPosts": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/Post" }
+              }
+            }
+          }
+        ]
+      },
+      "PolymorphicContent": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/TextContent" },
+          { "$ref": "#/components/schemas/ImageContent" },
+          { "$ref": "#/components/schemas/VideoContent" }
+        ],
+        "discriminator": {
+          "propertyName": "type"
+        }
+      },
+      "TextContent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["text"] },
+          "text": { "type": "string" }
+        },
+        "required": ["id", "type", "text"]
+      },
+      "ImageContent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["image"] },
+          "url": { "type": "string", "format": "uri" },
+          "alt": { "type": "string" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" }
+        },
+        "required": ["id", "type", "url"]
+      },
+      "VideoContent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["video"] },
+          "url": { "type": "string", "format": "uri" },
+          "duration": { "type": "number" },
+          "thumbnail": { "type": "string", "format": "uri" }
+        },
+        "required": ["id", "type", "url", "duration"]
+      },
+      "PrivacySettings": {
+        "type": "object",
+        "properties": {
+          "profilePublic": { "type": "boolean" },
+          "showEmail": { "type": "boolean" },
+          "allowMessages": { "type": "boolean" }
+        }
+      },
+      "NotificationSettings": {
+        "type": "object",
+        "properties": {
+          "emailNotifications": { "type": "boolean" },
+          "pushNotifications": { "type": "boolean" },
+          "smsNotifications": { "type": "boolean" },
+          "frequency": {
+            "type": "string",
+            "enum": ["immediate", "daily", "weekly", "never"]
+          }
+        }
+      },
+      "UserSettings": {
+        "allOf": [
+          { "$ref": "#/components/schemas/PrivacySettings" },
+          { "$ref": "#/components/schemas/NotificationSettings" },
+          {
+            "type": "object",
+            "properties": {
+              "userId": { "type": "string" },
+              "timezone": { "type": "string" },
+              "language": { "type": "string" }
+            },
+            "required": ["userId"]
+          }
+        ]
+      },
+      "Record": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

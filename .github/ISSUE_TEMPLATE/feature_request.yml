@@ -1,0 +1,47 @@
+name: Feature Request
+description: Suggest an idea or improvement
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your suggestion! Please describe the feature you'd like to see.
+
+  - type: textarea
+    id: pitch
+    attributes:
+      label: Pitch
+      description: A clear and compelling description of the feature
+      placeholder: What problem does this solve or what capability would it add?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Your idea for implementing this feature
+      placeholder: |
+        How should this feature work? Provide examples if possible.
+        ```typescript
+        // Example usage
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Approaches
+      description: Any alternative solutions or workarounds you've considered
+      placeholder: Are there other ways to achieve this?
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: This feature aligns with the project's scope
+          required: false

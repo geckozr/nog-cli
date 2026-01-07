@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for unused dependencies
+        run: npm run deps:check
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Build project
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Generate coverage report
+        run: npm run test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+        continue-on-error: true
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      - name: Check test coverage threshold
+        run: |
+          COVERAGE=$(cat coverage/coverage-final.json | jq '.total.lines.pct')
+          if (( $(echo "$COVERAGE < 90" | bc -l) )); then
+            echo "Test coverage is $COVERAGE%, but threshold is 90%"
+            exit 1
+          fi
+          echo "Test coverage is $COVERAGE% - OK"
