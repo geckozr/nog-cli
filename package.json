@@ -12,7 +12,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --project tsconfig.json && npx typedoc",
+    "build": "tsc --project tsconfig.json",
+    "docs": "typedoc",
     "test": "vitest run --dir test/units",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
