@@ -41,13 +41,3 @@ jobs:
 
       - name: Publish to NPM
         run: npm publish --provenance --access public
-
-      - name: Create GitHub Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            dist/**/*
-            README.md
-            LICENSE
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
