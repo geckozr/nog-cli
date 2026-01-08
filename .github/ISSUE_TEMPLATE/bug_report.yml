@@ -81,6 +81,18 @@ body:
       description: Any other relevant information (OpenAPI spec sample, environment details, etc.)
       placeholder: Add any other context about the problem here
 
+  - type: textarea
+    id: spec-snippet
+    attributes:
+      label: Minimal OpenAPI Snippet (optional)
+      description: Share a reduced OpenAPI excerpt that reproduces the issue (helps us generate an identical fixture)
+      placeholder: |
+        paths:
+          /users:
+            get:
+              responses:
+                '200': { ... }
+
   - type: checkboxes
     id: checklist
     attributes:
