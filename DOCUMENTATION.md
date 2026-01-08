@@ -215,7 +215,7 @@ uploadDocument$(body?: Buffer | ReadStream): Observable<void>
 
 #### Binary Downloads
 
-For binary responses (images, PDFs, etc.), the return type is `Blob` with appropriate `responseType`:
+For binary responses (images, PDFs, etc.), the return type is `Buffer` with appropriate `responseType` for Node.js:
 
 ```typescript
 // OpenAPI Spec
@@ -228,7 +228,7 @@ responses:
           format: binary
 
 // Generated Method
-downloadFile$(fileId: string): Observable<Blob>
+downloadFile$(fileId: string): Observable<Buffer>
 ```
 
 **Request/Response Metadata Handling:**
@@ -246,14 +246,13 @@ The converter automatically extracts and applies HTTP metadata:
 
 - **responseType**: Axios configuration for non-JSON responses
   - `'text'` for `text/*` content types
-  - `'blob'` for `image/*`, `application/pdf`, `application/octet-stream`
-  - `'arraybuffer'` for other binary types
+  - `'arraybuffer'` for binary content types such as `image/*`, `application/pdf`, or `application/octet-stream`
 
 **Context-Aware Binary Type Mapping:**
 
 - Request body binary with `multipart/form-data` → `Buffer | ReadStream`
-- Response body binary → `Blob`
-- This distinction allows proper handling of Node.js streams for uploads and browser-compatible Blobs for downloads
+- Response body binary → `Buffer`
+- This distinction allows proper handling of Node.js streams for uploads; browser consumers can still adapt the `Buffer` to a `Blob` if needed
 
 Advantage: Reactive programming, powerful operators (map, filter, switchMap, etc.).
 

@@ -51,7 +51,12 @@ import { ApiModule } from './generated';
 import { UserService } from './generated/services';
 
 @Module({
-  imports: [ApiModule],
+  imports: [
+    ApiModule.forRoot({
+      baseUrl: 'https://api.example.com',
+      headers: { Authorization: 'Bearer <token>' },
+    }),
+  ],
 })
 export class AppModule {}
 
@@ -63,6 +68,45 @@ export class UserController {
     return this.userService.getUser(id);
   }
 }
+
+// Async configuration variant
+@Module({
+  imports: [
+    ApiModule.forRootAsync({
+      useFactory: async () => ({
+        baseUrl: process.env.API_BASE_URL ?? 'https://api.example.com',
+        headers: { Authorization: `Bearer ${process.env.API_TOKEN ?? ''}` },
+      }),
+    }),
+  ],
+})
+export class AsyncAppModule {}
+
+// Alternative: dynamic headers via an Axios interceptor
+// Register a provider that enriches every outgoing request
+@Injectable()
+export class ApiRequestInterceptor implements OnModuleInit {
+  constructor(private readonly httpService: HttpService) {}
+
+  onModuleInit(): void {
+    this.httpService.axiosRef.interceptors.request.use((config) => {
+      const dynamicHeaders = {
+        'x-tenant-id': TenantContext.getCurrentTenant() ?? '',
+        Authorization: `Bearer ${TokenStore.getAccessToken() ?? ''}`,
+      };
+      return {
+        ...config,
+        headers: { ...(config.headers ?? {}), ...dynamicHeaders },
+      };
+    });
+  }
+}
+
+@Module({
+  imports: [ApiModule.forRoot({ baseUrl: 'https://api.example.com' })],
+  providers: [ApiRequestInterceptor],
+})
+export class InterceptedAppModule {}
 ```
 
 ### 3. Work with DTOs
@@ -100,8 +144,8 @@ await userService.uploadAvatar({ avatar, description: 'Profile picture' });
 const document = createReadStream('./document.pdf');
 await fileService.uploadDocument(document);
 
-// Download binary file
-const pdfBlob = await fileService.downloadDocument('doc-123');
+// Download binary file (returns Buffer in Node.js)
+const pdfBuffer = await fileService.downloadDocument('doc-123');
 ```
 
 ## Command-Line Options

@@ -4,7 +4,7 @@ Thank you for considering contributing to `nog-cli`. This guide outlines develop
 
 ## Prerequisites
 
-- **Node.js**: Version 18 or higher.
+- **Node.js**: Version 22 or higher (matches `engines` field).
 - **Package Manager**: `npm` version 9 or higher (or `pnpm`).
 - **Git**: For cloning and pushing changes.
 
@@ -36,7 +36,9 @@ Hooks in place:
 - **pre-commit**: runs `npx lint-staged` (ESLint + Prettier on staged files).
 - **commit-msg**: runs `npx --no -- commitlint --edit "$1"` (Conventional Commits).
 
-### 3. Verify Setup
+Alternative: you can also run `npx husky install` if you prefer Husky's built-in installer; `core.hooksPath` keeps the config explicit in repo.
+
+### 4. Verify Setup
 
 ```bash
 npm run build
@@ -50,13 +52,21 @@ All commands should complete without errors.
 
 ### Build
 
-Compile TypeScript and generate TypeDoc documentation:
+Compile TypeScript:
 
 ```bash
 npm run build
 ```
 
-Output is written to `dist/` and `docs/`.
+Output is written to `dist/`.
+
+Generate TypeDoc documentation:
+
+```bash
+npm run docs
+```
+
+Output is written to `docs/`.
 
 ### Test
 
@@ -76,6 +86,14 @@ Generate coverage report:
 
 ```bash
 npm run test:coverage
+```
+
+Optional test commands:
+
+```bash
+npm run test:e2e
+npm run test:ui
+npm run test:all
 ```
 
 **Coverage Requirement:** Greater than 90% line coverage. Pull requests must maintain or improve coverage.
@@ -124,6 +142,16 @@ Format code using Prettier:
 ```bash
 npm run format
 ```
+
+### Dependency Hygiene
+
+Before adding new imports or packages, run:
+
+```bash
+npm run deps:check
+```
+
+Address any reported unused or missing dependencies.
 
 ## Coding Standards
 
