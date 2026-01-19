@@ -1,13 +1,8 @@
 name: Deploy Documentation
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**'
-      - 'typedoc.json'
-      - '.github/workflows/docs.yml'
+  release:
+    types: [created, published]
 
 permissions:
   contents: write
