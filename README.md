@@ -1,4 +1,4 @@
-# nog-cli
+# nog-cli (NestJS OpenAPI Generator)
 
 [![CI](https://github.com/geckozr/nog-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/geckozr/nog-cli/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@gecko_zr/nog-cli.svg)](https://www.npmjs.com/package/@gecko_zr/nog-cli)
@@ -7,20 +7,25 @@
 [![codecov](https://codecov.io/gh/geckozr/nog-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/geckozr/nog-cli)
 [![Documentation](https://img.shields.io/badge/docs-TypeDoc-blue.svg)](https://geckozr.github.io/nog-cli/)
 
-A command-line interface tool for generating strict, type-safe NestJS SDKs from OpenAPI 3.0 specifications.
+**nog-cli** is a powerful CLI tool that transforms OpenAPI 3.0 specifications into production-ready Internal HTTP Clients for your NestJS ecosystem. It eliminates the need for manual boilerplate, delivering type-safe SDKs that feel like a native part of your application.
 
 ## Overview
 
-`nog-cli` transforms OpenAPI specifications into production-ready NestJS modules with full TypeScript type safety, runtime validation via `class-validator`, and support for complex polymorphic schemas. The generated code follows enterprise-grade standards: dependency injection, immutability, and zero runtime surprises.
+`nog-cli` (acronym for **N**estJs **O**penApi **G**enerator **Cli**) automates the integration process by generating a complete NestJS Module designed for enterprise-grade standards.
+
+The generated code provides:
+
+- **Ready-to-use Modules**: Fully compatible with NestJS Dependency Injection.
+- **Typed HTTP Services**: Clean, injectable classes for making REST calls without the guesswork.
+- **Runtime Validation**: Data Transfer Objects (DTOs) powered by class-validator for zero runtime surprises.
+- **Architectural Consistency**: Immutability, strict TypeScript compliance, and zero proprietary runtime dependencies.
 
 ## Key Features
 
 - **Type-Safe DTOs**: Generates `class-validator` decorated Data Transfer Objects with automatic validation.
 - **Polymorphism Support**: Handles complex union types (`oneOf`, `allOf`) via intelligent "Pure OneOf" and "Hybrid" strategies.
-- **Dual Service Methods**: Each operation generates both `Observable` (RxJS) and `Promise` (async/await) variants for maximum developer flexibility.
-- **Zero Runtime Dependencies**: Depends only on standard NestJS, Axios, and RxJS—no proprietary packages.
-- **Production Ready**: Strict TypeScript (`strict: true`), ESLint compliance, greater than 90% test coverage.
-- **Clean Architecture**: Decoupled pipeline: Parser → Internal Representation → Generator.
+- **Developer Flexibility**: Every operation generates both Observable (RxJS) and Promise (async/await) methods to suit any coding style.
+- **Clean Architecture**: Built with a decoupled pipeline (Parser → IR → Generator) and maintained with over 90% test coverage.
 
 ## Installation
 
