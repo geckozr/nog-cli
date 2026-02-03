@@ -376,19 +376,19 @@ export class ModuleWriter {
     cls.addGetAccessor({
       name: 'baseUrl',
       returnType: 'string',
-      statements: ["return this.config.baseUrl ?? '';"],
+      statements: ["return this.config?.baseUrl ?? '';"],
     });
 
     cls.addGetAccessor({
       name: 'headers',
       returnType: 'ApiHeaders',
-      statements: ['return this.config.headers ?? {};'],
+      statements: ['return this.config?.headers ?? {};'],
     });
 
     cls.addGetAccessor({
       name: 'httpOptions',
       returnType: 'AxiosRequestConfig',
-      statements: ['return this.config.httpOptions ?? {};'],
+      statements: ['return this.config?.httpOptions ?? {};'],
     });
 
     FileHeaderHelper.addHeader(sourceFile, this.specTitle, this.specVersion);
