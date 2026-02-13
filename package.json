@@ -1,6 +1,6 @@
 {
   "name": "@gecko_zr/nog-cli",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "description": "nog-cli - NestJS OpenAPI Generator CLI: Generate NestJS services, DTOs and modules from OpenAPI specifications",
   "main": "dist/src/main.js",
   "bin": {
@@ -70,9 +70,7 @@
     "@vitest/coverage-v8": "^4.0.14",
     "@vitest/ui": "^4.0.14",
     "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-jsdoc": "^62.1.0",
-    "eslint-plugin-prettier": "^5.5.4",
     "globals": "^17.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
