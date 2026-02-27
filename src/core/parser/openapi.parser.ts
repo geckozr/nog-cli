@@ -40,7 +40,7 @@ export class OpenApiParser {
       return validApi;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`OpenAPI Parser Error: ${message}`);
+      throw new Error(`OpenAPI Parser Error: ${message}`, { cause: error });
     }
   }
 
