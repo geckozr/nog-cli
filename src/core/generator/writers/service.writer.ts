@@ -220,7 +220,7 @@ export class ServiceWriter {
           const optional = !p.isRequired ? '?' : '';
 
           // Add JSDoc comment for the field if description exists
-          let fieldDef = '';
+          let fieldDef: string;
           if (p.description) {
             // Escape any */ sequences in description to prevent breaking JSDoc
             const escapedDescription = p.description.replace(/\*\//g, '*\\/');
@@ -348,7 +348,7 @@ export class ServiceWriter {
 
       const configObj = `{ ${configParts.join(', ')} }`;
 
-      let httpCall = '';
+      let httpCall: string;
       if (['get', 'delete', 'head', 'options'].includes(httpMethod)) {
         // Methods without body: (url, config)
         httpCall = `this.httpService.${httpMethod}<${returnType}>(url, ${configObj})`;
