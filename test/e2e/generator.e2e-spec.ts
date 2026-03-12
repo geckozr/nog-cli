@@ -21,6 +21,7 @@
  * - Data-driven approach scales to multiple OpenAPI specs without code duplication.
  */
 import { execSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { ModuleKind, Project, ScriptTarget } from 'ts-morph';
@@ -64,6 +65,27 @@ const loadGeneratedProject = (outputPath: string): Project => {
   return project;
 };
 
+const buildOutputSnapshot = (outputPath: string): [string, string][] => {
+  const files: [string, string][] = [];
+
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.name.endsWith('.ts')) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const hash = crypto.createHash('sha256').update(content).digest('hex');
+        const relativePath = path.relative(outputPath, fullPath);
+        files.push([relativePath, hash]);
+      }
+    }
+  };
+
+  walk(outputPath);
+  return files.sort((a, b) => a[0].localeCompare(b[0]));
+};
+
 beforeAll(() => {
   fs.rmSync(TEMP_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -75,8 +97,19 @@ describe('nog-cli generator E2E', () => {
       const outputDir = path.resolve(output);
       fs.rmSync(outputDir, { recursive: true, force: true });
 
+      // Timing benchmark
+      const start = performance.now();
       runCli(input, outputDir);
+      const duration = performance.now() - start;
 
+      console.log(`[${name}] Generation time: ${(duration / 1000).toFixed(2)}s`);
+      expect(duration).toBeLessThan(30000);
+
+      // Output regression snapshot
+      const snapshot = buildOutputSnapshot(outputDir);
+      expect(snapshot).toMatchSnapshot();
+
+      // Existing structural assertions
       const project = loadGeneratedProject(outputDir);
 
       const moduleFile = project
