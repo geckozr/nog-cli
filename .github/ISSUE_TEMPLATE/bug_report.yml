@@ -2,96 +2,57 @@ name: Bug Report
 description: Report a bug or unexpected behavior
 labels: [bug, needs-triage]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thank you for taking the time to report an issue. Please provide detailed information to help us diagnose and fix it quickly.
-
-  - type: input
-    id: version
-    attributes:
-      label: nog-cli Version
-      description: The version of nog-cli where you encountered the issue
-      placeholder: e.g., 0.9.0
-    validations:
-      required: true
-
-  - type: input
-    id: node-version
-    attributes:
-      label: Node.js Version
-      description: Output of `node --version`
-      placeholder: e.g., v18.17.0
-    validations:
-      required: true
-
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating System
-      description: The OS where the issue occurred
-      options:
-        - Linux
-        - macOS
-        - Windows
-        - Other
-    validations:
-      required: true
-
   - type: textarea
     id: description
     attributes:
-      label: Description
-      description: A clear and concise description of the bug
-      placeholder: What went wrong?
+      label: What happened?
+      description: Describe the bug and what you expected instead
+      placeholder: |
+        When I run `nog-cli generate spec.json`, I get...
+        I expected...
     validations:
       required: true
 
   - type: textarea
-    id: steps
+    id: reproduce
     attributes:
-      label: Steps to Reproduce
-      description: Step-by-step instructions to reproduce the issue
+      label: How to reproduce
+      description: Steps, command, or minimal OpenAPI snippet to reproduce the issue
       placeholder: |
         1. Run `nog-cli generate ...`
-        2. Observe...
-        3. Expected...
-      value: |
-        1.
-        2.
-        3.
+        2. ...
+
+        Or paste a minimal OpenAPI snippet:
+        ```yaml
+        paths:
+          /users:
+            get: ...
+        ```
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Error Logs or Output
+      label: Error output (optional)
       description: Paste relevant error messages or CLI output
       render: bash
-      placeholder: |
-        Error: ...
-        Stack trace (if applicable):
-        ...
 
-  - type: textarea
-    id: context
+  - type: input
+    id: version
     attributes:
-      label: Additional Context
-      description: Any other relevant information (OpenAPI spec sample, environment details, etc.)
-      placeholder: Add any other context about the problem here
+      label: nog-cli version
+      description: Run `nog-cli --version`
+      placeholder: e.g., 0.10.9
+    validations:
+      required: true
 
-  - type: textarea
-    id: spec-snippet
+  - type: input
+    id: environment
     attributes:
-      label: Minimal OpenAPI Snippet (optional)
-      description: Share a reduced OpenAPI excerpt that reproduces the issue (helps us generate an identical fixture)
-      placeholder: |
-        paths:
-          /users:
-            get:
-              responses:
-                '200': { ... }
+      label: Environment
+      description: Node version and OS
+      placeholder: e.g., Node 20.11.0, Linux
 
   - type: checkboxes
     id: checklist
@@ -100,5 +61,3 @@ body:
       options:
         - label: I have searched existing issues to avoid duplicates
           required: true
-        - label: I am using the latest version of nog-cli
-          required: false
