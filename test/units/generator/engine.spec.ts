@@ -3,97 +3,69 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GeneratorEngine } from '../../../src/core/generator/engine';
 import { IrDefinition } from '../../../src/core/ir/interfaces/index';
 
-/**
- * Hoisted mocks to enable access within vi.mock factories (prevents out-of-scope variable errors).
- */
 const mocks = vi.hoisted(() => ({
-  projectSave: vi.fn(),
-  projectCreateSourceFile: vi.fn(),
-  dtoWriteAll: vi.fn(),
-  serviceWriteAll: vi.fn(),
-  moduleWrite: vi.fn(),
-  indexWrite: vi.fn(),
-  usageWrite: vi.fn(),
+  dtoWrite: vi.fn().mockResolvedValue({ filename: 'test.dto.ts', generatedCode: '' }),
+  serviceWrite: vi.fn().mockResolvedValue({ filename: 'test.service.ts', generatedCode: '' }),
+  apiTypesWrite: vi.fn().mockResolvedValue({ filename: 'api.types.ts', generatedCode: '' }),
+  apiConfigurationWrite: vi
+    .fn()
+    .mockResolvedValue({ filename: 'api.configuration.ts', generatedCode: '' }),
+  apiUtilsWrite: vi.fn().mockResolvedValue({ filename: 'api.utils.ts', generatedCode: '' }),
+  apiModuleWrite: vi.fn().mockResolvedValue({ filename: 'api.module.ts', generatedCode: '' }),
+  indexGenerate: vi.fn().mockResolvedValue({ filename: 'index.ts', generatedCode: '' }),
   loggerInfo: vi.fn(),
   loggerError: vi.fn(),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
 }));
 
-/**
- * Mock ts-morph Project and compiler/manipulation settings.
- */
-vi.mock('ts-morph', () => {
-  return {
-    Project: vi.fn(function ProjectMock() {
-      return {
-        save: mocks.projectSave,
-        createSourceFile: mocks.projectCreateSourceFile,
-      };
-    }),
-    IndentationText: { TwoSpaces: '  ' },
-    QuoteKind: { Single: "'" },
-    ScriptTarget: { ESNext: 99 },
-    ModuleKind: { CommonJS: 1 },
-  };
-});
-
-/**
- * Mock DtoWriter with hoisted spy.
- */
 vi.mock('../../../src/core/generator/writers/dto.writer', () => ({
   DtoWriter: vi.fn(function DtoWriterMock() {
-    return {
-      writeAll: mocks.dtoWriteAll,
-    };
+    return { write: mocks.dtoWrite };
   }),
 }));
 
-/**
- * Mock ServiceWriter with hoisted spy.
- */
 vi.mock('../../../src/core/generator/writers/service.writer', () => ({
   ServiceWriter: vi.fn(function ServiceWriterMock() {
-    return {
-      writeAll: mocks.serviceWriteAll,
-    };
+    return { write: mocks.serviceWrite };
   }),
 }));
 
-/**
- * Mock ModuleWriter with hoisted spy.
- */
-vi.mock('../../../src/core/generator/writers/module.writer', () => ({
-  ModuleWriter: vi.fn(function ModuleWriterMock() {
-    return {
-      write: mocks.moduleWrite,
-    };
-  }),
-}));
-
-/**
- * Mock IndexWriter with hoisted spy.
- */
 vi.mock('../../../src/core/generator/writers/index.writer', () => ({
   IndexWriter: vi.fn(function IndexWriterMock() {
-    return {
-      write: mocks.indexWrite,
-    };
+    return { generate: mocks.indexGenerate };
   }),
 }));
 
-/**
- * Mock UsageWriter with hoisted spy.
- */
-vi.mock('../../../src/core/generator/writers/usage.writer', () => ({
-  UsageWriter: vi.fn(function UsageWriterMock() {
-    return {
-      write: mocks.usageWrite,
-    };
+vi.mock('../../../src/core/generator/writers/api-types.writer', () => ({
+  ApiTypesWriter: vi.fn(function ApiTypesWriterMock() {
+    return { write: mocks.apiTypesWrite };
   }),
 }));
 
-/**
- * Mock Logger with hoisted spies.
- */
+vi.mock('../../../src/core/generator/writers/api-configuration.writer', () => ({
+  ApiConfigurationWriter: vi.fn(function ApiConfigurationWriterMock() {
+    return { write: mocks.apiConfigurationWrite };
+  }),
+}));
+
+vi.mock('../../../src/core/generator/writers/api-utils.writer', () => ({
+  ApiUtilsWriter: vi.fn(function ApiUtilsWriterMock() {
+    return { write: mocks.apiUtilsWrite };
+  }),
+}));
+
+vi.mock('../../../src/core/generator/writers/api-module.writer', () => ({
+  ApiModuleWriter: vi.fn(function ApiModuleWriterMock() {
+    return { write: mocks.apiModuleWrite };
+  }),
+}));
+
+vi.mock('fs', () => ({
+  mkdirSync: mocks.mkdirSync,
+  writeFileSync: mocks.writeFileSync,
+}));
+
 vi.mock('../../../src/utils/logger', () => ({
   Logger: {
     info: mocks.loggerInfo,
@@ -104,9 +76,6 @@ vi.mock('../../../src/utils/logger', () => ({
 describe('GeneratorEngine', () => {
   const mockOutputDir = '/tmp/output';
 
-  /**
-   * Minimal IR mock sufficient for engine passthrough testing.
-   */
   const mockIr: IrDefinition = {
     models: [{ name: 'TestDto', fileName: 'test-dto', isEnum: false, properties: [] }],
     services: [{ name: 'TestService', operations: new Map() }],
@@ -120,58 +89,102 @@ describe('GeneratorEngine', () => {
     vi.clearAllMocks();
   });
 
-  it('should initialize project with correct configuration', () => {
-    const engine = new GeneratorEngine(mockOutputDir);
-    expect(engine.getProject()).toBeDefined();
-  });
-
-  it('should execute generation steps in correct order', async () => {
+  it('should call DTO writer once per model and service writer once per service', async () => {
     const engine = new GeneratorEngine(mockOutputDir);
     await engine.generate(mockIr);
 
-    expect(mocks.dtoWriteAll).toHaveBeenCalledWith(mockIr.models);
-    expect(mocks.serviceWriteAll).toHaveBeenCalledWith(mockIr.services);
-    expect(mocks.moduleWrite).toHaveBeenCalledWith(mockIr);
-    expect(mocks.indexWrite).toHaveBeenCalledWith(mockIr);
-    expect(mocks.usageWrite).toHaveBeenCalledWith(mockIr);
-    expect(mocks.projectSave).toHaveBeenCalled();
-
-    /**
-     * Verify the order of execution: DTOs → Services → Module → Index → Usage → Save.
-     */
-    const dtoOrder = mocks.dtoWriteAll.mock.invocationCallOrder[0];
-    const serviceOrder = mocks.serviceWriteAll.mock.invocationCallOrder[0];
-    const moduleOrder = mocks.moduleWrite.mock.invocationCallOrder[0];
-    const indexOrder = mocks.indexWrite.mock.invocationCallOrder[0];
-    const usageOrder = mocks.usageWrite.mock.invocationCallOrder[0];
-    const saveOrder = mocks.projectSave.mock.invocationCallOrder[0];
-
-    expect(dtoOrder).toBeLessThan(serviceOrder);
-    expect(serviceOrder).toBeLessThan(moduleOrder);
-    expect(moduleOrder).toBeLessThan(indexOrder);
-    expect(indexOrder).toBeLessThan(usageOrder);
-    expect(usageOrder).toBeLessThan(saveOrder);
+    expect(mocks.dtoWrite).toHaveBeenCalledTimes(mockIr.models.length);
+    expect(mocks.serviceWrite).toHaveBeenCalledTimes(mockIr.services.length);
   });
 
-  it('should use custom module name from config', async () => {
-    const engine = new GeneratorEngine(mockOutputDir, { moduleName: 'CustomModule' });
+  it('should invoke api-types/configuration/utils writers with cliVersion + spec metadata', async () => {
+    const engine = new GeneratorEngine(mockOutputDir);
     await engine.generate(mockIr);
 
-    const { ModuleWriter } = await import('../../../src/core/generator/writers/module.writer');
-    expect(ModuleWriter).toHaveBeenCalledWith(
-      expect.anything(),
-      mockOutputDir,
-      'CustomModule',
+    const expectedArgs = [expect.any(String), 'Unknown Spec', 'Unknown Version'];
+
+    expect(mocks.apiTypesWrite).toHaveBeenCalledWith(...expectedArgs);
+    expect(mocks.apiConfigurationWrite).toHaveBeenCalledWith(...expectedArgs);
+    expect(mocks.apiUtilsWrite).toHaveBeenCalledWith(...expectedArgs);
+  });
+
+  it('should strip "Module" suffix from default moduleName when invoking api-module writer', async () => {
+    const engine = new GeneratorEngine(mockOutputDir);
+    await engine.generate(mockIr);
+
+    expect(mocks.apiModuleWrite).toHaveBeenCalledWith(
+      mockIr.services,
+      'Api',
+      expect.any(String),
       'Unknown Spec',
       'Unknown Version',
     );
   });
 
-  it('should handle errors and log them', async () => {
+  it('should strip "Module" suffix from custom moduleName when configured', async () => {
+    const engine = new GeneratorEngine(mockOutputDir, { moduleName: 'CustomModule' });
+    await engine.generate(mockIr);
+
+    expect(mocks.apiModuleWrite).toHaveBeenCalledWith(
+      mockIr.services,
+      'Custom',
+      expect.any(String),
+      'Unknown Spec',
+      'Unknown Version',
+    );
+  });
+
+  it('should generate three barrel index files (dto, services, root) with correct exports', async () => {
+    const engine = new GeneratorEngine(mockOutputDir);
+    await engine.generate(mockIr);
+
+    expect(mocks.indexGenerate).toHaveBeenCalledTimes(3);
+
+    expect(mocks.indexGenerate.mock.calls[0][0]).toEqual(['test-dto.dto']);
+    expect(mocks.indexGenerate.mock.calls[1][0]).toEqual(['test-service.service']);
+    expect(mocks.indexGenerate.mock.calls[2][0]).toEqual([
+      'dto',
+      'services',
+      'api.module',
+      'api.configuration',
+      'api.types',
+      'api.utils',
+    ]);
+  });
+
+  it('should execute module writers in order: types -> configuration -> utils -> module', async () => {
+    const engine = new GeneratorEngine(mockOutputDir);
+    await engine.generate(mockIr);
+
+    const types = mocks.apiTypesWrite.mock.invocationCallOrder[0];
+    const config = mocks.apiConfigurationWrite.mock.invocationCallOrder[0];
+    const utils = mocks.apiUtilsWrite.mock.invocationCallOrder[0];
+    const apiModule = mocks.apiModuleWrite.mock.invocationCallOrder[0];
+
+    expect(types).toBeLessThan(config);
+    expect(config).toBeLessThan(utils);
+    expect(utils).toBeLessThan(apiModule);
+  });
+
+  it('should run DTOs before services, services before module writers, module writers before barrels', async () => {
+    const engine = new GeneratorEngine(mockOutputDir);
+    await engine.generate(mockIr);
+
+    const lastDto = mocks.dtoWrite.mock.invocationCallOrder.at(-1) ?? 0;
+    const lastService = mocks.serviceWrite.mock.invocationCallOrder.at(-1) ?? 0;
+    const firstModule = mocks.apiTypesWrite.mock.invocationCallOrder[0];
+    const firstBarrel = mocks.indexGenerate.mock.invocationCallOrder[0];
+
+    expect(lastDto).toBeLessThan(lastService);
+    expect(lastService).toBeLessThan(firstModule);
+    expect(firstModule).toBeLessThan(firstBarrel);
+  });
+
+  it('should propagate errors from writers and log them', async () => {
     const engine = new GeneratorEngine(mockOutputDir);
     const error = new Error('Write failed');
 
-    mocks.dtoWriteAll.mockRejectedValueOnce(error);
+    mocks.dtoWrite.mockRejectedValueOnce(error);
 
     await expect(engine.generate(mockIr)).rejects.toThrow('Write failed');
 

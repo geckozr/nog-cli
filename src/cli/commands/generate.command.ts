@@ -79,6 +79,6 @@ export class GenerateCommand implements CommandHandler<GenerateOptions> {
     });
     await engine.generate(ir);
 
-    Logger.info('✅ Generation completed successfully!');
+    Logger.info('Generation completed successfully.');
   }
 }

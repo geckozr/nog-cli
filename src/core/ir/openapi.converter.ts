@@ -215,7 +215,7 @@ export class OpenApiConverter {
   }
 
   /**
-   * Scansiona i path per creare i Servizi
+   * Scans OpenAPI paths and produces the IrService set.
    */
   private buildServices(): IrService[] {
     const servicesMap = new Map<string, IrService>();

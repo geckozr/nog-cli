@@ -3,7 +3,7 @@
  * Used throughout the generator to transform OpenAPI identifiers into idiomatic TypeScript names.
  */
 
-const WORD_SEPARATOR = /[^a-zA-Z0-9]+|(?=[A-Z])/;
+const WORD_SEPARATOR = /[^a-zA-Z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/;
 const NOT_ALPHANUMERIC = /[^a-zA-Z0-9_]/g;
 const LEADING_DIGIT = /^[0-9]/;
 const KEBAB_CAMEL_CASE = /([a-z0-9])([A-Z])/g;
@@ -112,11 +112,14 @@ export function toCamelCase(str: string): string {
  * @returns The string in PascalCase format
  */
 export function toPascalCase(str: string): string {
-  return str
-    .split(WORD_SEPARATOR)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join('');
+  return (
+    str
+      // .toLowerCase()
+      .split(WORD_SEPARATOR)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join('')
+  );
 }
 
 /**
@@ -152,7 +155,6 @@ export function toKebabCase(str: string): string {
  *
  * @param str - The string to sanitize
  * @returns A valid TypeScript identifier
- * TODO: check if this function is useful or could be moved to the other casing functions
  */
 export function sanitizeName(str: string): string {
   // Remove or replace invalid characters (keep only alphanumeric and underscore)

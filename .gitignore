@@ -1,6 +1,6 @@
 /node_modules
 /dist
-/docs
+/dist-docs
 /output
 /example
 coverage/
@@ -9,6 +9,7 @@ coverage/
 # Test and coverage
 /coverage
 /test-output
+/test-output-baseline
 /.vitest
 /.vscode
 

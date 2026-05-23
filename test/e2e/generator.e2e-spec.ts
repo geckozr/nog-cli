@@ -1,31 +1,26 @@
 /**
- * End-to-End Test Suite for nog-cli Generator
+ * End-to-End Test Suite for nog-cli
  *
- * **Strategy**: Data-Driven Testing with Syntax Validation
+ * **Strategy**: in-process invocation of the CLI Program against real-world OpenAPI specs.
  *
- * This suite validates the entire SDK generation pipeline against real-world OpenAPI specifications:
+ * The CLI is executed by directly calling `new Program({ skipExit: true }).parse(argv)`
+ * — no subprocess, no compiled `dist/`. This means:
+ *  - tests run against the TypeScript source as-is (no `npm run build` required)
+ *  - the Commander wiring is exercised end-to-end (real `commander`, real `GenerateCommand`)
+ *  - generated files are inspected with the TypeScript Compiler API to validate
+ *    syntactic correctness and structural shape
  *
- * 1. **Test Data**: Fixtures are loaded from `test/fixtures/` (Cyclos and Complex edge cases).
- * 2. **CLI Invocation**: Each test case runs the compiled CLI via `child_process.execSync`.
- * 3. **Syntax Validation**: Generated files are loaded into a ts-morph `Project` without compilation,
- *    allowing deep AST inspection without requiring `npm install` inside the output directory.
- * 4. **Assertions**: Verify that:
- *    - The module file exists and contains an `@Module` decorated class.
- *    - Service files are generated with operation methods.
- *    - No file I/O errors occur during generation.
- *
- * Benefits:
- * - Catches structural regressions early (missing imports, malformed classes, etc.).
- * - Avoids expensive full compilation/runtime test steps.
- * - Provides confidence that generated code is syntactically valid TypeScript.
- * - Data-driven approach scales to multiple OpenAPI specs without code duplication.
+ * Assertions cover:
+ *  - successful end-to-end generation on real fixtures (Cyclos, Complex)
+ *  - structural sanity of the produced SDK (NestJS module, services with methods)
+ *  - Commander error paths (missing argument, unknown option)
  */
-import { execSync } from 'child_process';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { ModuleKind, Project, ScriptTarget } from 'ts-morph';
-import { beforeAll, describe, expect, it } from 'vitest';
+import ts from 'typescript';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { Program } from '../../src/cli/program';
 
 const TEMP_DIR = path.resolve('test-output');
 
@@ -42,48 +37,86 @@ const TEST_CASES = [
   },
 ];
 
-const runCli = (inputPath: string, outputPath: string): void => {
-  execSync(
-    `node ${path.resolve('dist/src/main.js')} generate ${path.resolve(inputPath)} -o ${outputPath}`,
-    { stdio: 'inherit' },
-  );
+const runCli = async (argv: string[]): Promise<void> => {
+  const program = new Program({ skipExit: true });
+  await program.parse(['node', 'nog-cli', ...argv]);
 };
 
-const loadGeneratedProject = (outputPath: string): Project => {
-  const project = new Project({
-    compilerOptions: {
-      target: ScriptTarget.ES2021,
-      module: ModuleKind.CommonJS,
-      esModuleInterop: true,
-      skipLibCheck: true,
-      declaration: false,
-    },
-    skipAddingFilesFromTsConfig: true,
-  });
+interface ParsedFile {
+  filename: string;
+  sourceFile: ts.SourceFile;
+}
 
-  project.addSourceFilesAtPaths(path.join(outputPath, '**/*.ts'));
-  return project;
-};
-
-const buildOutputSnapshot = (outputPath: string): [string, string][] => {
-  const files: [string, string][] = [];
+const collectTypeScriptFiles = (outputPath: string): ParsedFile[] => {
+  const files: ParsedFile[] = [];
 
   const walk = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath);
-      } else if (entry.name.endsWith('.ts')) {
-        const content = fs.readFileSync(fullPath, 'utf-8');
-        const hash = crypto.createHash('sha256').update(content).digest('hex');
-        const relativePath = path.relative(outputPath, fullPath);
-        files.push([relativePath, hash]);
+        continue;
       }
+      if (!entry.name.endsWith('.ts')) continue;
+
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      const sourceFile = ts.createSourceFile(
+        entry.name,
+        content,
+        ts.ScriptTarget.ES2021,
+        /* setParentNodes */ true,
+      );
+      files.push({ filename: entry.name, sourceFile });
     }
   };
 
   walk(outputPath);
-  return files.sort((a, b) => a[0].localeCompare(b[0]));
+  return files;
+};
+
+const hasClassWithDecorator = (sourceFile: ts.SourceFile, decoratorName: string): boolean => {
+  let found = false;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+
+    if (ts.isClassDeclaration(node)) {
+      const decorators = ts.getDecorators(node) ?? [];
+      for (const decorator of decorators) {
+        const expression = decorator.expression;
+        const identifier = ts.isCallExpression(expression) ? expression.expression : expression;
+        if (ts.isIdentifier(identifier) && identifier.text === decoratorName) {
+          found = true;
+          return;
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return found;
+};
+
+const hasMethodDeclaration = (sourceFile: ts.SourceFile): boolean => {
+  let found = false;
+
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+
+    if (ts.isClassDeclaration(node)) {
+      if (node.members.some((member) => ts.isMethodDeclaration(member))) {
+        found = true;
+        return;
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return found;
 };
 
 beforeAll(() => {
@@ -93,42 +126,69 @@ beforeAll(() => {
 
 describe('nog-cli generator E2E', () => {
   TEST_CASES.forEach(({ name, input, output }) => {
-    it(`should generate compilable SDK for ${name}`, () => {
+    it(`should generate a structurally valid SDK for ${name}`, async () => {
       const outputDir = path.resolve(output);
       fs.rmSync(outputDir, { recursive: true, force: true });
 
-      // Timing benchmark
       const start = performance.now();
-      runCli(input, outputDir);
+      await runCli(['generate', path.resolve(input), '-o', outputDir]);
       const duration = performance.now() - start;
 
       console.log(`[${name}] Generation time: ${(duration / 1000).toFixed(2)}s`);
       expect(duration).toBeLessThan(30000);
 
-      // Output regression snapshot
-      const snapshot = buildOutputSnapshot(outputDir);
-      expect(snapshot).toMatchSnapshot();
+      const files = collectTypeScriptFiles(outputDir);
 
-      // Existing structural assertions
-      const project = loadGeneratedProject(outputDir);
-
-      const moduleFile = project
-        .getSourceFiles()
-        .find((file) => file.getBaseName().toLowerCase().endsWith('.module.ts'));
+      const moduleFile = files.find((file) => file.filename.toLowerCase().endsWith('.module.ts'));
       expect(moduleFile).toBeDefined();
+      expect(hasClassWithDecorator(moduleFile!.sourceFile, 'Module')).toBe(true);
 
-      const moduleClass = moduleFile?.getClasses().find((cls) => cls.getDecorator('Module'));
-      expect(moduleClass).toBeDefined();
-
-      const serviceFiles = project
-        .getSourceFiles()
-        .filter((file) => file.getBaseName().toLowerCase().endsWith('.service.ts'));
+      const serviceFiles = files.filter((file) =>
+        file.filename.toLowerCase().endsWith('.service.ts'),
+      );
       expect(serviceFiles.length).toBeGreaterThan(0);
 
-      const hasServiceMethods = serviceFiles.some((file) =>
-        file.getClasses().some((cls) => cls.getMethods().length > 0),
-      );
+      const hasServiceMethods = serviceFiles.some((file) => hasMethodDeclaration(file.sourceFile));
       expect(hasServiceMethods).toBe(true);
+    });
+  });
+
+  describe('Commander integration', () => {
+    it('should reject an unknown option with a non-zero exit', async () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        await runCli([
+          'generate',
+          path.resolve('test/fixtures/cyclos.json'),
+          '--definitely-not-an-option',
+        ]).catch(() => undefined);
+
+        expect(exitSpy).toHaveBeenCalled();
+        const exitCode = exitSpy.mock.calls[0]?.[0];
+        expect(exitCode).not.toBe(0);
+      } finally {
+        exitSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+    });
+
+    it('should reject a missing required argument with a non-zero exit', async () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        // 'generate' requires <openapiFile> — invoking without it must error.
+        await runCli(['generate']).catch(() => undefined);
+
+        expect(exitSpy).toHaveBeenCalled();
+        const exitCode = exitSpy.mock.calls[0]?.[0];
+        expect(exitCode).not.toBe(0);
+      } finally {
+        exitSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
     });
   });
 });

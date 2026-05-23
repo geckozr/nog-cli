@@ -183,7 +183,7 @@ describe('OpenApiConverter', () => {
         });
 
         it('should correctly convert the ApiService', () => {
-          const apiService = converted.services.find((service) => service.name === 'APIService');
+          const apiService = converted.services.find((service) => service.name === 'ApiService');
           expect(apiService).toBeDefined();
           expect(apiService?.operations.size).toBeGreaterThan(0);
 

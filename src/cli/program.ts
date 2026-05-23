@@ -17,7 +17,8 @@ const defaultProgramConfig: ProgramConfig = {
 
 /**
  * CLI Program Orchestrator.
- * * Manages the registration of commands, arguments parsing, and execution delegation.
+ *
+ * Manages the registration of commands, arguments parsing, and execution delegation.
  * It wraps the `commander` library to provide a strictly typed and consistent interface.
  */
 export class Program {
@@ -64,7 +65,8 @@ export class Program {
 
   /**
    * Registers a generic command handler into the program.
-   * * @param handler - The command handler instance implementing the specific logic.
+   *
+   * @param handler - The command handler instance implementing the specific logic.
    * @returns The Program instance for method chaining.
    */
   registerCommand<TOptions>(handler: CommandHandler<TOptions>): this {
@@ -116,7 +118,8 @@ export class Program {
 
   /**
    * Parses the command line arguments and executes the matched command.
-   * * @param argv - The arguments array (defaults to process.argv).
+   *
+   * @param argv - The arguments array (defaults to process.argv).
    * @returns A promise that resolves when the command execution is complete.
    */
   public async parse(argv?: string[]): Promise<void> {

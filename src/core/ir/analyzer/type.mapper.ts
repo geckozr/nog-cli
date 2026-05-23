@@ -211,6 +211,7 @@ export class TypeMapper {
       schema.properties
     ) {
       const fields: string[] = [];
+      const referencedTypes: string[] = [];
       const required = schema.required || [];
 
       for (const [propName, propSchema] of Object.entries(schema.properties)) {
@@ -222,12 +223,27 @@ export class TypeMapper {
 
         const optional = isRequired ? '' : '?';
         fields.push(`${propName}${optional}: ${propTypeName}`);
+
+        // Collect non-primitive, non-builtin types for import resolution
+        if (!propType.isPrimitive) {
+          const rawTypes = Array.isArray(propType.rawType) ? propType.rawType : [propType.rawType];
+          for (const raw of rawTypes) {
+            // Split union types (e.g., 'Buffer | ReadStream') into individual types
+            const parts = raw.split('|').map((s) => s.trim());
+            for (const t of parts) {
+              if (!this.isBuiltInTypeForImport(t)) {
+                referencedTypes.push(t);
+              }
+            }
+          }
+        }
       }
 
       return {
         rawType: `{ ${fields.join('; ')} }`,
         isArray: false,
         isPrimitive: false,
+        referencedTypes: referencedTypes.length > 0 ? referencedTypes : undefined,
       };
     }
 
@@ -286,6 +302,20 @@ export class TypeMapper {
 
   private static isPrimitiveType(type?: string): boolean {
     return type === 'string' || type === 'number' || type === 'integer' || type === 'boolean';
+  }
+
+  private static isBuiltInTypeForImport(type: string): boolean {
+    return [
+      'string',
+      'number',
+      'boolean',
+      'Date',
+      'Blob',
+      'void',
+      'any',
+      'Buffer',
+      'ReadStream',
+    ].includes(type);
   }
 
   // ===========================================================================

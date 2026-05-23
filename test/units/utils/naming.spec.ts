@@ -29,6 +29,13 @@ describe('Naming', () => {
     expect(result).toBe(expected);
   });
 
+  it('should convert a string to PascalCase when is all uppercase', () => {
+    const upperCaseString = 'IS_EMAIL';
+    const expected = 'IsEmail';
+    const result = toPascalCase(upperCaseString);
+    expect(result).toBe(expected);
+  });
+
   it('should convert a string to kebab-case', () => {
     const expected = 'hello-world-example-test-example';
     const result = toKebabCase(testString);

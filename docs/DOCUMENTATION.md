@@ -21,7 +21,7 @@ OpenAPI Spec (Input)
         ↓
  Internal Representation (IR) - Normalize to framework-agnostic structure
         ↓
-   [Generator]       - Emit TypeScript code via ts-morph AST
+   [Generator]       - Emit TypeScript code via ts.factory + Prettier
         ↓
 Generated NestJS Module (Output)
 ```
@@ -39,7 +39,7 @@ This architecture provides several benefits:
 
 - **Parser**: MUST NOT perform business logic transformations
 - **IR**: MUST contain all data needed for generation (Generator NEVER accesses raw OpenAPI)
-- **Generator**: MUST use ts-morph AST manipulation (NO string concatenation for code)
+- **Generator**: MUST build TypeScript ASTs through `ts.factory` (NO string concatenation for code)
 
 ## Data Flow Pipeline
 
@@ -91,14 +91,19 @@ The `OpenApiConverter` resolves circular dependencies using a two-pass approach:
 
 **Location:** `src/core/generator/`
 
-The generator consumes the IR and emits TypeScript code using the `ts-morph` library (Abstract Syntax Tree manipulation).
+The generator consumes the IR and emits TypeScript code by building ASTs with the official `typescript` Compiler API (`ts.factory`), printing them with `ts.Printer`, and formatting the result with `prettier`.
 
 #### Writer Classes
 
-- **DtoWriter**: Emits DTO classes and Enums.
-- **ServiceWriter**: Emits NestJS Service classes.
-- **ModuleWriter**: Emits the primary NestJS Module that wires services.
+- **DtoWriter**: Emits DTO classes, enums, and pure-union type aliases.
+- **ServiceWriter**: Emits NestJS Service classes (dual-method: Observable + Promise).
+- **ApiTypesWriter**: Emits the shared `ApiModuleConfig` / `ApiModuleAsyncConfig` interfaces.
+- **ApiConfigurationWriter**: Emits the injectable `ApiConfiguration` token.
+- **ApiUtilsWriter**: Emits helper utilities (query/path/header param builders).
+- **ApiModuleWriter**: Emits the NestJS `ApiModule` with `forRoot` / `forRootAsync` factory methods.
 - **IndexWriter**: Emits barrel export files (`index.ts`).
+
+Each writer is composed from small, reusable builders under `src/core/generator/writers/core/` (`AstPrinter`, `DeclarationBuilder`, `DecoratorBuilder`, `ImportBuilder`, `ParameterBuilder`, `PropertyBuilder`, `ServiceMethodBuilder`, `ServiceStatementBuilder`, `TypeBuilder`, `ExpressionBuilder`, `HeaderGenerator`, `CommentModifier`) which are injected through the constructor.
 
 **Key File:** `src/core/generator/engine.ts`
 
@@ -298,14 +303,15 @@ Validation rules are automatically extracted from OpenAPI schema constraints:
 
 ## Design Decisions
 
-### Why ts-morph for Code Generation?
+### Why ts.factory + Prettier for Code Generation?
 
-We use `ts-morph` (AST manipulation) instead of string templates because:
+We build ASTs directly with the TypeScript Compiler API (`ts.factory`), print them with `ts.Printer`, and format the output with `prettier`, instead of using string templates because:
 
-- **Correctness:** Impossible to emit syntactically invalid code.
-- **Formatting:** Automatic indentation, semicolons, and line breaks.
-- **Maintenance:** Changes to code structure are declarative, not brittle.
-- **Testing:** Emitted code can be validated by loading into a `Project` and inspecting the AST.
+- **Correctness:** Impossible to emit syntactically invalid code — the AST encodes the grammar.
+- **Formatting:** Prettier handles indentation, quotes, semicolons, and line breaks uniformly.
+- **Zero adapter overhead:** `ts.factory` is shipped by the `typescript` package itself — no extra runtime dependency.
+- **Maintenance:** Changes are declarative (small, focused builders under `writers/core/`).
+- **Testing:** Emitted code can be re-parsed with `ts.createSourceFile` and inspected via the visitor API (no separate AST library needed).
 
 ### Why Two-Pass Circular Dependency Resolution?
 
@@ -347,18 +353,31 @@ src/
 │   │   │   ├── validator.map.ts # Maps constraints to class-validator
 │   │   │   └── schema.merger.ts # Handles allOf, oneOf, anyOf
 │   │   └── openapi.converter.ts # LOGIC: OpenAPI -> IR Transformer
-│   └── generator/        # [Layer 3] Code Emission (ts-morph)
+│   └── generator/        # [Layer 3] Code Emission (ts.factory + Prettier)
 │       ├── engine.ts            # Main orchestrator (FileSystem writes)
-│       ├── helpers/             # Reusable code generation utilities
-│       │   ├── type.helper.ts
-│       │   ├── import.helper.ts
-│       │   ├── decorator.helper.ts
-│       │   └── file-header.helper.ts
-│       └── writers/             # Logic for writing specific file types
-│           ├── dto.writer.ts    # Writes *.dto.ts
-│           ├── service.writer.ts # Writes *.service.ts
-│           ├── module.writer.ts  # Writes *.module.ts
-│           └── index.writer.ts   # Writes index.ts
+│       ├── helpers/
+│       │   └── type.helper.ts   # Shared naming / type-name utilities
+│       └── writers/
+│           ├── core/            # Reusable AST builders (DI-friendly)
+│           │   ├── ast-printer.ts
+│           │   ├── comment-modifier.ts
+│           │   ├── declaration-builder.ts
+│           │   ├── decorator-builder.ts
+│           │   ├── expression-builder.ts
+│           │   ├── header-generator.ts
+│           │   ├── import-builder.ts
+│           │   ├── parameter-builder.ts
+│           │   ├── property-builder.ts
+│           │   ├── service-method-builder.ts
+│           │   ├── service-statement-builder.ts
+│           │   └── type-builder.ts
+│           ├── dto.writer.ts          # Writes *.dto.ts (+ enums + pure unions)
+│           ├── service.writer.ts      # Writes *.service.ts
+│           ├── api-module.writer.ts   # Writes api.module.ts
+│           ├── api-configuration.writer.ts # Writes api.configuration.ts
+│           ├── api-types.writer.ts    # Writes api.types.ts
+│           ├── api-utils.writer.ts    # Writes api.utils.ts
+│           └── index.writer.ts        # Writes index.ts barrels
 └── utils/                # Shared utilities (Logger, Naming, FS)
     ├── logger.ts
     ├── naming.ts
@@ -391,7 +410,7 @@ test/
 
 1. **Update IR:** Add `'PATTERN'` to the `IrValidator` union type in `src/core/ir/interfaces/models.ts`.
 2. **Update Analyzer:** In `src/core/ir/analyzer/type.mapper.ts`, extract the `pattern` field from OpenAPI schemas and add a `PATTERN` validator.
-3. **Update Generator:** In `src/core/generator/writers/dto.writer.ts`, read the `PATTERN` validator and apply the `@Matches()` decorator using `ts-morph`.
+3. **Update Generator:** In `src/core/generator/writers/dto.writer.ts`, read the `PATTERN` validator and emit the `@Matches()` decorator via the `DecoratorBuilder` (which wraps `ts.factory.createDecorator`).
 
 ### Testing Strategy
 
@@ -413,5 +432,6 @@ test/
 
 - [OpenAPI 3.0 Specification](https://spec.openapis.org/oas/v3.0.3)
 - [NestJS Documentation](https://docs.nestjs.com/)
-- [ts-morph Documentation](https://ts-morph.readthedocs.io/)
+- [TypeScript Compiler API (`ts.factory`)](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+- [Prettier Documentation](https://prettier.io/docs/en/)
 - [class-validator Documentation](https://github.com/typestack/class-validator)
