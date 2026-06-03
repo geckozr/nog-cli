@@ -311,66 +311,69 @@ describe('DtoWriter', () => {
     expect(output.generatedCode).toContain('value: CompanionDogTraits');
   });
 
-  // TODO: move to a separate performance test file and increase iterations for a more robust benchmark
-  it('should generate 1000 complex DTOs within the performance budget (Performance Benchmark)', async () => {
-    // Exercises every code path: inheritance, primitives, custom refs, arrays,
-    // comments, validators, and discriminators.
-    const complexModel: IrModel = {
-      name: 'ComplexPerformanceDto',
-      fileName: 'complex-performance-dto',
-      isEnum: false,
-      extends: 'BasePerformanceDto',
-      description: 'A very complex DTO for performance testing',
-      properties: [
-        {
-          name: 'id',
-          type: { rawType: 'string', isArray: false, isPrimitive: true },
-          isOptional: false,
-          isReadonly: true,
-          validators: [{ type: 'IS_UUID' }],
-        },
-        {
-          name: 'traits',
-          type: { rawType: 'BaseTraits', isArray: false, isPrimitive: false },
-          isOptional: false,
-          isReadonly: false,
-          validators: [],
-          discriminator: {
-            propertyName: 'traitType',
-            mapping: {
-              guard: 'GuardDogTraits',
-              companion: 'CompanionDogTraits',
+  // Performance benchmark. Skipped on CI because shared GitHub Actions runners
+  // exhibit large wall-clock variance (noisy neighbour, 2 vCPU, overlay FS), so
+  // millisecond-budget asserts are flaky there. Local runs keep the check — if
+  // the per-DTO write time regresses on a developer machine, we want to know.
+  it.skipIf(process.env.CI)(
+    'should generate 1000 complex DTOs within the performance budget (Performance Benchmark)',
+    async () => {
+      // Exercises every code path: inheritance, primitives, custom refs, arrays,
+      // comments, validators, and discriminators.
+      const complexModel: IrModel = {
+        name: 'ComplexPerformanceDto',
+        fileName: 'complex-performance-dto',
+        isEnum: false,
+        extends: 'BasePerformanceDto',
+        description: 'A very complex DTO for performance testing',
+        properties: [
+          {
+            name: 'id',
+            type: { rawType: 'string', isArray: false, isPrimitive: true },
+            isOptional: false,
+            isReadonly: true,
+            validators: [{ type: 'IS_UUID' }],
+          },
+          {
+            name: 'traits',
+            type: { rawType: 'BaseTraits', isArray: false, isPrimitive: false },
+            isOptional: false,
+            isReadonly: false,
+            validators: [],
+            discriminator: {
+              propertyName: 'traitType',
+              mapping: {
+                guard: 'GuardDogTraits',
+                companion: 'CompanionDogTraits',
+              },
             },
           },
-        },
-        {
-          name: 'tags',
-          type: { rawType: 'string', isArray: true, isPrimitive: true },
-          isOptional: true,
-          isReadonly: false,
-          validators: [{ type: 'MAX_LENGTH', params: 50 }],
-        },
-      ],
-    };
+          {
+            name: 'tags',
+            type: { rawType: 'string', isArray: true, isPrimitive: true },
+            isOptional: true,
+            isReadonly: false,
+            validators: [{ type: 'MAX_LENGTH', params: 50 }],
+          },
+        ],
+      };
 
-    const iterations = 1000;
+      const iterations = 1000;
 
-    const start = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      complexModel.name = `ComplexPerformanceDto${i}`;
-      await writer.write(complexModel, [], new Set(), '1.0.0', 'OpenAPI Benchmark', '3.1.0');
-    }
-    const end = performance.now();
-    const duration = end - start;
-    // GitHub Actions standard runners are roughly 3-4x slower than a modern dev laptop
-    // for CPU-bound workloads, so allow a generous budget when CI=true. Local runs keep
-    // the tight budget — if it regresses there, we want to know.
-    const budget = process.env.CI ? 8000 : 3000;
-    console.log(
-      `[benchmark] dto.writer 1000 complex DTOs: ${duration.toFixed(0)}ms (budget ${budget}ms)`,
-    );
-    expect(duration).toBeLessThan(budget);
-  });
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        complexModel.name = `ComplexPerformanceDto${i}`;
+        await writer.write(complexModel, [], new Set(), '1.0.0', 'OpenAPI Benchmark', '3.1.0');
+      }
+      const end = performance.now();
+      const duration = end - start;
+      const budget = 3000;
+      console.log(
+        `[benchmark] dto.writer 1000 complex DTOs: ${duration.toFixed(0)}ms (budget ${budget}ms)`,
+      );
+      expect(duration).toBeLessThan(budget);
+    },
+  );
 
   it('should generate a type alias for a pure oneOf model', async () => {
     // Constructing a model that strictly satisfies isPureOneOfModel conditions
