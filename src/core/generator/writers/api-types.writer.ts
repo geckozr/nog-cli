@@ -105,7 +105,11 @@ export class ApiTypesWriter {
           this.buildUseFactoryType(apiModuleConfigUnion),
           true,
         ),
-        this.declarationBuilder.createPropertySignature('inject', this.buildInjectType(), true),
+        this.declarationBuilder.createPropertySignature(
+          'inject',
+          this.typeBuilder.createArray(this.typeBuilder.createPrimitive('any')),
+          true,
+        ),
         this.declarationBuilder.createPropertySignature(
           'extraProviders',
           this.typeBuilder.createArray(this.typeBuilder.createReference('Provider')),
@@ -118,6 +122,7 @@ export class ApiTypesWriter {
           ts.factory.createLiteralTypeNode(ts.factory.createStringLiteral('imports')),
         ]),
       ],
+      true,
     );
 
     const apiConfigToken = this.declarationBuilder.createConstVariable(
@@ -154,21 +159,9 @@ export class ApiTypesWriter {
       ts.factory.createToken(ts.SyntaxKind.DotDotDotToken),
       'args',
       undefined,
-      this.typeBuilder.createArray(ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)),
+      this.typeBuilder.createArray(this.typeBuilder.createPrimitive('any')),
     );
 
     return this.declarationBuilder.createFunctionTypeNode([restParameter], returnType);
-  }
-
-  private buildInjectType(): ts.TypeReferenceNode {
-    const injectElement = this.typeBuilder.createUnion([
-      this.typeBuilder.createPrimitive('string'),
-      ts.factory.createKeywordTypeNode(ts.SyntaxKind.SymbolKeyword),
-      this.typeBuilder.createReference('Type', [
-        ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-      ]),
-    ]);
-
-    return this.typeBuilder.createReference('Array', [injectElement]);
   }
 }

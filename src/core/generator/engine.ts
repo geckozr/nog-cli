@@ -4,11 +4,9 @@ import path from 'path';
 import packageJson from '../../../package.json';
 import { Logger } from '../../utils/logger';
 import { IrDefinition } from '../ir/interfaces';
-import { TypeHelper } from './helpers/type.helper';
 import { ApiConfigurationWriter } from './writers/api-configuration.writer';
 import { ApiModuleWriter } from './writers/api-module.writer';
 import { ApiTypesWriter } from './writers/api-types.writer';
-import { ApiUtilsWriter } from './writers/api-utils.writer';
 import { AstPrinter } from './writers/core/ast-printer';
 import { CommentModifier } from './writers/core/comment-modifier';
 import { DeclarationBuilder } from './writers/core/declaration-builder';
@@ -23,6 +21,7 @@ import { ServiceStatementBuilder } from './writers/core/service-statement-builde
 import { TypeBuilder } from './writers/core/type-builder';
 import { DtoWriter } from './writers/dto.writer';
 import { IndexWriter } from './writers/index.writer';
+import { RequestBuilderWriter } from './writers/request-builder.writer';
 import { ServiceWriter } from './writers/service.writer';
 
 /**
@@ -53,7 +52,7 @@ export class GeneratorEngine {
   private serviceWriter: ServiceWriter;
   private apiTypesWriter: ApiTypesWriter;
   private apiConfigurationWriter: ApiConfigurationWriter;
-  private apiUtilsWriter: ApiUtilsWriter;
+  private requestBuilderWriter: RequestBuilderWriter;
   private apiModuleWriter: ApiModuleWriter;
   private indexWriter: IndexWriter;
 
@@ -125,7 +124,13 @@ export class GeneratorEngine {
       decoratorBuilder,
     );
 
-    this.apiUtilsWriter = new ApiUtilsWriter(printer, headerGen, importBuilder, typeBuilder);
+    this.requestBuilderWriter = new RequestBuilderWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+    );
 
     this.apiModuleWriter = new ApiModuleWriter(
       printer,
@@ -158,10 +163,13 @@ export class GeneratorEngine {
       const dtoDir = path.join(this.outputDir, 'dto');
       mkdirSync(dtoDir, { recursive: true });
 
+      const inheritedMap = this.buildInheritedPropertiesMap(ir.models);
+
       for (const model of ir.models) {
         const file = await this.dtoWriter.write(
           model,
           ir.models,
+          inheritedMap.get(model.name) ?? new Set(),
           cliVersion,
           specTitle,
           specVersion,
@@ -186,7 +194,7 @@ export class GeneratorEngine {
         writeFileSync(path.join(serviceDir, file.filename), file.generatedCode);
       }
 
-      // 3. NestJS module (api.types, api.configuration, api.utils, api.module)
+      // 3. NestJS module (api.types, api.configuration, api.module)
       Logger.info('Generating NestJS Module...');
 
       const apiTypesFile = await this.apiTypesWriter.write(cliVersion, specTitle, specVersion);
@@ -199,8 +207,15 @@ export class GeneratorEngine {
       );
       writeFileSync(path.join(this.outputDir, apiConfigFile.filename), apiConfigFile.generatedCode);
 
-      const apiUtilsFile = await this.apiUtilsWriter.write(cliVersion, specTitle, specVersion);
-      writeFileSync(path.join(this.outputDir, apiUtilsFile.filename), apiUtilsFile.generatedCode);
+      const requestBuilderFile = await this.requestBuilderWriter.write(
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(
+        path.join(this.outputDir, requestBuilderFile.filename),
+        requestBuilderFile.generatedCode,
+      );
 
       const moduleBaseName = this.config.moduleName?.replace(/Module$/, '') ?? 'Api';
       const apiModuleFile = await this.apiModuleWriter.write(
@@ -226,9 +241,7 @@ export class GeneratorEngine {
       );
       writeFileSync(path.join(dtoDir, 'index.ts'), dtoIndex.generatedCode);
 
-      const serviceFileNames = ir.services.map(
-        (service) => `${TypeHelper.getFileName(service.name)}.service`,
-      );
+      const serviceFileNames = ir.services.map((service) => service.fileName);
       const serviceIndex = await this.indexWriter.generate(
         serviceFileNames,
         cliVersion,
@@ -243,7 +256,7 @@ export class GeneratorEngine {
         'api.module',
         'api.configuration',
         'api.types',
-        'api.utils',
+        'request-builder.service',
       ];
       const rootIndex = await this.indexWriter.generate(
         rootExports,
@@ -258,5 +271,29 @@ export class GeneratorEngine {
       Logger.error('Code generation failed:', error);
       throw error;
     }
+  }
+
+  private buildInheritedPropertiesMap(models: IrDefinition['models']): Map<string, Set<string>> {
+    const registry = new Map(models.map((m) => [m.name, m]));
+    const cache = new Map<string, Set<string>>();
+
+    const resolve = (name: string): Set<string> => {
+      const cached = cache.get(name);
+      if (cached) return cached;
+      const model = registry.get(name);
+      const set = new Set<string>();
+      if (model?.extends) {
+        const parent = registry.get(model.extends);
+        if (parent) {
+          for (const p of parent.properties) set.add(p.name);
+          for (const inh of resolve(parent.name)) set.add(inh);
+        }
+      }
+      cache.set(name, set);
+      return set;
+    };
+
+    for (const m of models) resolve(m.name);
+    return cache;
   }
 }

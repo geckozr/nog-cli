@@ -1,6 +1,5 @@
 import ts from 'typescript';
 
-import { toKebabCase } from '../../../utils/naming';
 import { IrModel, IrOperation, IrParameter, IrService, IrType } from '../../ir';
 import { TypeHelper } from '../helpers/type.helper';
 import { AstPrinter, IAstPrintedFile } from './core/ast-printer';
@@ -9,7 +8,7 @@ import { HeaderGenerator } from './core/header-generator';
 import { ImportBuilder } from './core/import-builder';
 import { InlineParameterDef, ParameterBuilder } from './core/parameter-builder';
 import { ServiceMethodBuilder } from './core/service-method-builder';
-import { ServiceStatementBuilder } from './core/service-statement-builder';
+import { QueryParamMeta, ServiceStatementBuilder } from './core/service-statement-builder';
 import { TypeBuilder, isPrimitiveTypeName } from './core/type-builder';
 
 export class ServiceWriter {
@@ -36,7 +35,6 @@ export class ServiceWriter {
     const nestCommonImports = new Set<string>(['Injectable']);
     const nestAxiosImports = new Set<string>(['HttpService']);
     const axiosImports = new Set<string>(['AxiosResponse']);
-    const apiUtilsImports = new Set<string>();
     const modelRegistry = new Map(allModels.map((m) => [m.name, m]));
 
     const classElements: ts.ClassElement[] = [];
@@ -47,7 +45,6 @@ export class ServiceWriter {
       const { observableMethod, promiseMethod } = this.buildOperationMethods(
         operation,
         customTypeImports,
-        apiUtilsImports,
       );
 
       classElements.push(observableMethod);
@@ -75,12 +72,9 @@ export class ServiceWriter {
     importNodes.push(
       this.importBuilder.createNamedImport('../api.configuration', ['ApiConfiguration']),
     );
-
-    if (apiUtilsImports.size > 0) {
-      importNodes.push(
-        this.importBuilder.createNamedImport('../api.utils', Array.from(apiUtilsImports)),
-      );
-    }
+    importNodes.push(
+      this.importBuilder.createNamedImport('../request-builder.service', ['RequestBuilder']),
+    );
 
     importNodes.push(this.importBuilder.createNamedImport('rxjs', Array.from(rxjsImports)));
     importNodes.push(this.importBuilder.createNamedImport('axios', Array.from(axiosImports)));
@@ -113,7 +107,7 @@ export class ServiceWriter {
       specVersion,
     );
 
-    const fileName = `${toKebabCase(service.name)}.service.ts`;
+    const fileName = `${service.fileName}.ts`;
 
     return this.printer.print(nodesWithHeader, fileName);
   }
@@ -131,31 +125,25 @@ export class ServiceWriter {
   }
 
   private buildConstructor(): ts.ConstructorDeclaration {
-    const httpServiceParam = ts.factory.createParameterDeclaration(
-      [
-        ts.factory.createModifier(ts.SyntaxKind.PrivateKeyword),
-        ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword),
-      ],
-      undefined,
-      ts.factory.createIdentifier('httpService'),
-      undefined,
-      this.typeBuilder.createReference('HttpService'),
-    );
-
-    const configParam = ts.factory.createParameterDeclaration(
-      [
-        ts.factory.createModifier(ts.SyntaxKind.PrivateKeyword),
-        ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword),
-      ],
-      undefined,
-      ts.factory.createIdentifier('config'),
-      undefined,
-      this.typeBuilder.createReference('ApiConfiguration'),
-    );
+    const makeParam = (name: string, type: string): ts.ParameterDeclaration =>
+      ts.factory.createParameterDeclaration(
+        [
+          ts.factory.createModifier(ts.SyntaxKind.PrivateKeyword),
+          ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword),
+        ],
+        undefined,
+        ts.factory.createIdentifier(name),
+        undefined,
+        this.typeBuilder.createReference(type),
+      );
 
     return ts.factory.createConstructorDeclaration(
       undefined,
-      [httpServiceParam, configParam],
+      [
+        makeParam('httpService', 'HttpService'),
+        makeParam('config', 'ApiConfiguration'),
+        makeParam('rb', 'RequestBuilder'),
+      ],
       ts.factory.createBlock([]),
     );
   }
@@ -163,7 +151,6 @@ export class ServiceWriter {
   private buildOperationMethods(
     operation: IrOperation,
     customTypeImports: Set<string>,
-    apiUtilsImports: Set<string>,
   ): { observableMethod: ts.MethodDeclaration; promiseMethod: ts.MethodDeclaration } {
     const pathParams = operation.parameters.filter((p: IrParameter) => p.in === 'path');
     const bodyParams = operation.parameters.filter((p: IrParameter) => p.in === 'body');
@@ -172,13 +159,10 @@ export class ServiceWriter {
 
     const methodParams: ts.ParameterDeclaration[] = [];
     const callArgs: string[] = [];
-    const queryParamNames: string[] = [];
-    const headerParamNames: string[] = [];
 
     const requiredBodyParams = bodyParams.filter((p) => p.isRequired);
     const optionalBodyParams = bodyParams.filter((p) => !p.isRequired);
 
-    // Parameter order matches old writer: required body → required path → optional body → params
     let bodyVar: string | undefined = undefined;
 
     for (const p of requiredBodyParams) {
@@ -212,47 +196,54 @@ export class ServiceWriter {
       bodyVar = p.name;
     }
 
-    // TODO: Evaluate if headers should be strictly separated from query params in the method signature.
-    const inlineProps: InlineParameterDef[] = [];
-    for (const p of [...queryParams, ...headerParams]) {
-      inlineProps.push({
-        name: p.name,
-        typeNode: this.mapIrType(p.type, customTypeImports),
-        isOptional: !p.isRequired,
-        description: p.description,
-      });
-      if (p.in === 'query') {
-        queryParamNames.push(p.name);
-      } else if (p.in === 'header') {
-        headerParamNames.push(p.name);
-      }
+    const toInlineDef = (p: IrParameter): InlineParameterDef => ({
+      name: p.name,
+      typeNode: this.mapIrType(p.type, customTypeImports),
+      isOptional: !p.isRequired,
+      description: p.description,
+    });
+    const queryProps: InlineParameterDef[] = queryParams.map(toInlineDef);
+    const headerProps: InlineParameterDef[] = headerParams.map(toInlineDef);
+
+    const paramsParam = this.parameterBuilder.buildSplitParams(
+      'params',
+      queryProps,
+      headerProps,
+      true,
+    );
+    if (paramsParam) {
+      methodParams.push(paramsParam);
+      callArgs.push('params');
     }
 
-    if (inlineProps.length > 0) {
-      methodParams.push(this.parameterBuilder.buildInlineObject('params', inlineProps, true));
-      callArgs.push('params');
+    const queryParamNames = queryParams.map((p) => p.name);
+    const headerParamNames = headerParams.map((p) => p.name);
+    const pathParamNames = pathParams.map((p) => p.name);
+
+    const queryParamMeta: Record<string, QueryParamMeta> = {};
+    for (const p of queryParams) {
+      if (p.style !== undefined || p.explode !== undefined) {
+        queryParamMeta[p.name] = { style: p.style, explode: p.explode };
+      }
     }
 
     const isFormData =
       operation.requestContentType === 'multipart/form-data' ||
       operation.requestContentType === 'application/x-www-form-urlencoded';
 
-    if (isFormData) {
-      apiUtilsImports.add('toFormData');
-    }
-
     const baseReturnTypeNode = this.mapIrType(
       operation.returnType || { rawType: 'any', isPrimitive: true, isArray: false },
       customTypeImports,
     );
 
-    const urlStatements = this.statementBuilder.buildUrlStatements(operation.path);
+    const urlStatements = this.statementBuilder.buildUrlStatements(operation.path, pathParamNames);
     const httpCallStatements = this.statementBuilder.buildHttpCall({
       httpMethod: operation.method,
       bodyVar,
       queryParams: queryParamNames,
+      queryParamMeta: Object.keys(queryParamMeta).length > 0 ? queryParamMeta : undefined,
       headerParams: headerParamNames,
-      hasOptionalParams: inlineProps.length > 0,
+      hasOptionalParams: paramsParam !== null,
       acceptHeader: operation.acceptHeader,
       contentTypeHeader: operation.requestContentType,
       responseType: operation.responseType,
@@ -294,6 +285,11 @@ export class ServiceWriter {
     const rawTypes = Array.isArray(irType.rawType) ? irType.rawType : [irType.rawType];
 
     const typeNodes = rawTypes.map((typeName) => {
+      // Literal union (anonymous string enum from OpenAPI): the entries are
+      // literal values, not TypeScript type names — emit them as `'value'`.
+      if (irType.composition === 'union' && irType.isPrimitive) {
+        return this.typeBuilder.createStringLiteral(typeName);
+      }
       if (irType.isPrimitive) {
         return this.typeBuilder.createPrimitive(isPrimitiveTypeName(typeName) ? typeName : 'any');
       }

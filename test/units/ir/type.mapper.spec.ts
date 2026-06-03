@@ -152,14 +152,18 @@ describe('TypeMapper', () => {
     });
 
     describe('objects handling', () => {
-      it('should default to any for object type without properties', () => {
+      it('should emit Record<string, unknown> for free-form object (no properties, no additionalProperties)', () => {
         const schema: OpenAPIV3.SchemaObject = {
           type: 'object',
         };
 
         const iType = TypeMapper.map(schema, registry);
 
-        expect(iType).toEqual({ rawType: 'any', isArray: false, isPrimitive: true });
+        expect(iType).toEqual({
+          rawType: 'Record<string, unknown>',
+          isArray: false,
+          isPrimitive: false,
+        });
       });
 
       it('should default to any for empty schema object', () => {
@@ -179,7 +183,7 @@ describe('TypeMapper', () => {
         const iType = TypeMapper.map(schema, registry);
 
         expect(iType).toEqual({
-          rawType: 'Record<string, any>',
+          rawType: 'Record<string, unknown>',
           isArray: false,
           isPrimitive: false,
         });
@@ -200,7 +204,7 @@ describe('TypeMapper', () => {
         });
       });
 
-      it('should handle object with additionalProperties as false', () => {
+      it('should handle object with additionalProperties as false (no properties → free-form fallback)', () => {
         const schema: OpenAPIV3.SchemaObject = {
           type: 'object',
           additionalProperties: false,
@@ -208,7 +212,11 @@ describe('TypeMapper', () => {
 
         const iType = TypeMapper.map(schema, registry);
 
-        expect(iType).toEqual({ rawType: 'any', isArray: false, isPrimitive: true });
+        expect(iType).toEqual({
+          rawType: 'Record<string, unknown>',
+          isArray: false,
+          isPrimitive: false,
+        });
       });
     });
 
@@ -457,6 +465,57 @@ describe('TypeMapper', () => {
       const iType = TypeMapper.map(schema, new Map());
 
       expect(iType).toEqual({ rawType: 'any', isArray: false, isPrimitive: true });
+    });
+
+    it('should emit inline type literal for object with properties in a response (no context)', () => {
+      const schema: OpenAPIV3.SchemaObject = {
+        type: 'object',
+        properties: {
+          count: { type: 'integer' },
+        },
+      };
+
+      const iType = TypeMapper.map(schema, new Map());
+
+      expect(iType.rawType).toBe('{ count?: number }');
+      expect(iType.isPrimitive).toBe(false);
+      expect(iType.isArray).toBe(false);
+    });
+
+    it('should emit inline type literal for object with properties in urlencoded request body', () => {
+      const schema: OpenAPIV3.SchemaObject = {
+        type: 'object',
+        properties: {
+          grant_type: { type: 'string' },
+          client_id: { type: 'string' },
+        },
+        required: ['grant_type'],
+      };
+
+      const iType = TypeMapper.map(schema, new Map(), {
+        isRequestBody: true,
+        contentType: 'application/x-www-form-urlencoded',
+      });
+
+      expect(iType.rawType).toBe('{ grant_type: string; client_id?: string }');
+      expect(iType.isPrimitive).toBe(false);
+    });
+
+    it('should still emit Buffer | ReadStream for binary fields inside a multipart request body', () => {
+      const schema: OpenAPIV3.SchemaObject = {
+        type: 'object',
+        properties: {
+          image: { type: 'string', format: 'binary' },
+          name: { type: 'string' },
+        },
+      };
+
+      const iType = TypeMapper.map(schema, new Map(), {
+        isRequestBody: true,
+        contentType: 'multipart/form-data',
+      });
+
+      expect(iType.rawType).toBe('{ image?: Buffer | ReadStream; name?: string }');
     });
   });
 });

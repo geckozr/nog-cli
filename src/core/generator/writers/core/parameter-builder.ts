@@ -45,9 +45,67 @@ export class ParameterBuilder {
     properties: InlineParameterDef[],
     isOptional: boolean = true,
   ): ts.ParameterDeclaration {
-    // TODO: Evaluate if headers should be strictly separated from query params in the method signature.
+    return ts.factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      ts.factory.createIdentifier(name),
+      isOptional ? ts.factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+      this.buildInlineObjectType(properties),
+      undefined,
+    );
+  }
+
+  /**
+   * Builds a `params?: { query?: {...}; headers?: {...} }` parameter, omitting
+   * the `query` or `headers` branches when their property list is empty.
+   * Returns `null` when both branches are empty.
+   *
+   * Keeping query and headers in separate sub-objects (rather than one flat record)
+   * lets the runtime `RequestBuilder` apply each set under its own OpenAPI rules
+   * without having to disambiguate by name.
+   */
+  public buildSplitParams(
+    name: string,
+    queryProps: InlineParameterDef[],
+    headerProps: InlineParameterDef[],
+    isOptional: boolean = true,
+  ): ts.ParameterDeclaration | null {
+    if (queryProps.length === 0 && headerProps.length === 0) return null;
+
+    const branches: ts.PropertySignature[] = [];
+    if (queryProps.length > 0) {
+      branches.push(
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createIdentifier('query'),
+          ts.factory.createToken(ts.SyntaxKind.QuestionToken),
+          this.buildInlineObjectType(queryProps),
+        ),
+      );
+    }
+    if (headerProps.length > 0) {
+      branches.push(
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createIdentifier('headers'),
+          ts.factory.createToken(ts.SyntaxKind.QuestionToken),
+          this.buildInlineObjectType(headerProps),
+        ),
+      );
+    }
+
+    return ts.factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      ts.factory.createIdentifier(name),
+      isOptional ? ts.factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+      ts.factory.createTypeLiteralNode(branches),
+      undefined,
+    );
+  }
+
+  private buildInlineObjectType(properties: InlineParameterDef[]): ts.TypeLiteralNode {
     const propertySignatures = properties.map((prop) => {
-      // Use string literal for names with dashes or invalid identifier characters (e.g., 'X-API-Key')
       const isValidIdentifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(prop.name);
       const nameNode = isValidIdentifier
         ? ts.factory.createIdentifier(prop.name)
@@ -63,15 +121,6 @@ export class ParameterBuilder {
       return this.commentModifier.addJSDoc(signature, prop.description);
     });
 
-    const typeLiteral = ts.factory.createTypeLiteralNode(propertySignatures);
-
-    return ts.factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      ts.factory.createIdentifier(name),
-      isOptional ? ts.factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
-      typeLiteral,
-      undefined,
-    );
+    return ts.factory.createTypeLiteralNode(propertySignatures);
   }
 }

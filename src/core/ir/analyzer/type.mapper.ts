@@ -184,7 +184,7 @@ export class TypeMapper {
     // Handle 'additionalProperties' which translates to TypeScript Record<string, T>
     if (schema.additionalProperties) {
       if (schema.additionalProperties === true) {
-        return { rawType: 'Record<string, any>', isArray: false, isPrimitive: false };
+        return { rawType: 'Record<string, unknown>', isArray: false, isPrimitive: false };
       }
 
       if (typeof schema.additionalProperties === 'object') {
@@ -203,13 +203,11 @@ export class TypeMapper {
       }
     }
 
-    // Special case: multipart/form-data request body with properties
-    // Generate inline type like { fieldName?: Type }
-    if (
-      context?.isRequestBody &&
-      context?.contentType?.includes('multipart/form-data') &&
-      schema.properties
-    ) {
+    // Object with explicit `properties`: emit an inline TS type literal `{ field?: Type; ... }`.
+    // Applies to any context — multipart request bodies (binary → Buffer | ReadStream via
+    // handlePrimitive), urlencoded forms, response bodies, inline parameters. Object schemas
+    // without `properties` still fall through to the `any` catch-all below.
+    if (schema.properties) {
       const fields: string[] = [];
       const referencedTypes: string[] = [];
       const required = schema.required || [];
@@ -247,8 +245,10 @@ export class TypeMapper {
       };
     }
 
-    // Generic object without specific properties definition
-    return { rawType: 'any', isArray: false, isPrimitive: true };
+    // Free-form object: `{type: "object"}` with neither `properties` nor `additionalProperties`.
+    // Emit `Record<string, unknown>` instead of `any` so consumers must narrow before access —
+    // matches the explicit `additionalProperties` branch above and keeps the SDK strict.
+    return { rawType: 'Record<string, unknown>', isArray: false, isPrimitive: false };
   }
 
   private static handlePrimitive(

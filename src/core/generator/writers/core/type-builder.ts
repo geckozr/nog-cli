@@ -70,6 +70,17 @@ export class TypeBuilder {
   }
 
   /**
+   * Creates a TypeScript string-literal type node, e.g. `'square'`. Used for
+   * inline literal unions emitted from OpenAPI string enums declared without a title.
+   *
+   * @param value The string literal value.
+   * @returns The generated LiteralTypeNode.
+   */
+  public createStringLiteral(value: string): ts.LiteralTypeNode {
+    return ts.factory.createLiteralTypeNode(ts.factory.createStringLiteral(value));
+  }
+
+  /**
    * Creates an Intersection type from multiple type nodes (e.g., BaseEntity & Timestamped).
    * A single-element input still yields an IntersectionTypeNode; the printer
    * renders it as the lone member.

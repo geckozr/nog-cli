@@ -18,17 +18,17 @@ See [docs/DOCUMENTATION.md](./docs/DOCUMENTATION.md) for the architectural deep 
 
 ## Development commands
 
-| Command                     | What it does                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| `npm run build`             | TS production build (`tsc -p tsconfig.build.json`).                                              |
-| `npm test`                  | Vitest unit suite (`test/units`).                                                                |
-| `npm run test:e2e`          | E2E generation suite (Cyclos + complex fixtures, validates AST via the TypeScript Compiler API). |
-| `npm run test:all`          | Units + E2E in one run.                                                                          |
-| `npm run test:coverage`     | Coverage report.                                                                                 |
-| `npm run lint` / `lint:fix` | ESLint.                                                                                          |
-| `npm run format`            | Prettier over `src/` and `test/`.                                                                |
-| `npm run deps:check`        | Run before adding any new import to avoid stale dependencies.                                    |
-| `npm run docs`              | TypeDoc developer docs into `dist-docs/`.                                                        |
+| Command                     | What it does                                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `npm run build`             | TS production build (`tsc -p tsconfig.build.json`).                                                  |
+| `npm test`                  | Vitest unit suite (`test/units`).                                                                    |
+| `npm run test:e2e`          | E2E generation suite (real-world + complex fixtures, validates AST via the TypeScript Compiler API). |
+| `npm run test:all`          | Units + E2E in one run.                                                                              |
+| `npm run test:coverage`     | Coverage report.                                                                                     |
+| `npm run lint` / `lint:fix` | ESLint.                                                                                              |
+| `npm run format`            | Prettier over `src/` and `test/`.                                                                    |
+| `npm run deps:check`        | Run before adding any new import to avoid stale dependencies.                                        |
+| `npm run docs`              | TypeDoc developer docs into `dist-docs/`.                                                            |
 
 Husky hooks: `pre-commit` runs `lint-staged`, `commit-msg` runs `commitlint`. Never bypass them (`--no-verify` is forbidden).
 
@@ -68,7 +68,7 @@ src/
 test/
   units/                                 # Vitest, mock dependencies, camelCase mocks
   e2e/                                   # Vitest, fixture-driven, validates AST via ts.createSourceFile
-  fixtures/                              # petstore.json, cyclos.json, complex.json
+  fixtures/                              # OpenAPI spec fixtures (standard, real-world, edge-case)
 ```
 
 ## Testing strategy

@@ -28,7 +28,10 @@ describe('ApiModuleWriter', () => {
   });
 
   it('should generate the complete api.module.ts file', async () => {
-    const mockServices = [{ name: 'UsersService' }, { name: 'PostsService' }] as IrService[];
+    const mockServices = [
+      { name: 'UsersService', fileName: 'users.service' },
+      { name: 'PostsService', fileName: 'posts.service' },
+    ] as IrService[];
 
     const result = await writer.write(mockServices, 'MyApi', '1.0.0', 'OpenAPI TEST', '3.1.0');
 
@@ -36,54 +39,65 @@ describe('ApiModuleWriter', () => {
 
     const output = result.generatedCode;
 
-    // Base imports
-    expect(output).toContain(
-      "import { Module, DynamicModule, Provider, Type } from '@nestjs/common';",
+    // Base imports — Provider and Type come from @nestjs/common because the
+    // inline createAsyncProviders helper references them.
+    expect(output).toMatch(
+      /import\s*\{[\s\S]*?Module[\s\S]*?DynamicModule[\s\S]*?Provider[\s\S]*?Type[\s\S]*?\}\s*from\s*['"]@nestjs\/common['"]/,
     );
     expect(output).toContain("import { HttpModule } from '@nestjs/axios';");
     expect(output).toContain("import { ApiConfiguration } from './api.configuration';");
-    // api.types import is emitted as multi-line by the printer
+    expect(output).toContain("import { RequestBuilder } from './request-builder.service';");
     expect(output).toMatch(
       /import\s*\{[\s\S]*?API_CONFIG[\s\S]*?ApiModuleAsyncConfig[\s\S]*?ApiModuleConfig[\s\S]*?ApiModuleConfigFactory[\s\S]*?\}\s*from\s*['"]\.\/api\.types['"]/,
     );
 
-    // Dynamic service imports — file names are kebab-cased from the service class name
-    expect(output).toContain("import { UsersService } from './services/users-service.service';");
-    expect(output).toContain("import { PostsService } from './services/posts-service.service';");
+    expect(output).toContain("import { UsersService } from './services/users.service';");
+    expect(output).toContain("import { PostsService } from './services/posts.service';");
 
     // Class declaration
     expect(output).toContain('@Module({})');
     expect(output).toContain('export class MyApiModule {');
 
-    // forRoot
+    // forRoot — providers declared inline on the module, HttpModule.register reads config inline.
     expect(output).toContain('static forRoot(config: ApiModuleConfig = {}): DynamicModule {');
-    // Provider array is emitted multi-line; verify the key entries individually
-    expect(output).toContain('const providers: Provider[]');
-    expect(output).toContain('provide: API_CONFIG,');
-    expect(output).toContain('useValue: config ?? {}');
     expect(output).toContain('HttpModule.register({');
-    expect(output).toContain('exports: [ApiConfiguration, PostsService, UsersService]');
+    expect(output).toContain('paramsSerializer: { indexes: null }');
+    expect(output).toMatch(/\.\.\.config\.httpOptions/);
+    expect(output).toMatch(
+      /providers:\s*\[\s*ApiConfiguration,\s*RequestBuilder,\s*\{[\s\S]*?provide:\s*API_CONFIG[\s\S]*?useValue:\s*config[\s\S]*?\},\s*PostsService,\s*UsersService,?\s*\]/,
+    );
+    expect(output).toMatch(
+      /exports:\s*\[\s*API_CONFIG,\s*ApiConfiguration,\s*RequestBuilder,\s*HttpModule,\s*PostsService,\s*UsersService,?\s*\]/,
+    );
 
-    // forRootAsync
-    expect(output).toContain('static forRootAsync(options: ApiModuleAsyncConfig): DynamicModule {');
-    expect(output).toContain('const asyncProviders = createAsyncProviders(options);');
+    // forRootAsync — declares asyncProviders + imports as locals, then reuses
+    // asyncProviders by reference both in the module's providers and in
+    // HttpModule.registerAsync({ extraProviders }). Same reference is what keeps
+    // the consumer useFactory firing exactly once per registration on NestJS v11.
+    expect(output).toMatch(
+      /static forRootAsync\(\s*options: ApiModuleAsyncConfig,?\s*\): DynamicModule \{/,
+    );
+    expect(output).toMatch(/const asyncProviders\s*=\s*createAsyncProviders\(options\);/);
+    expect(output).toMatch(/const imports\s*=\s*options\.imports\s*\?\?\s*\[\s*\];/);
+
     expect(output).toContain('HttpModule.registerAsync({');
-    expect(output).toContain('exports: [ApiConfiguration, PostsService, UsersService]');
+    expect(output).toMatch(/imports,/);
+    expect(output).toMatch(/inject:\s*\[API_CONFIG\]/);
+    expect(output).toMatch(/extraProviders:\s*asyncProviders/);
+    expect(output).toContain('useFactory: async (config: ApiModuleConfig) =>');
 
-    // createAsyncProviders helper
-    expect(output).toContain(
-      'function createAsyncProviders(options: ApiModuleAsyncConfig): Provider[] {',
+    // Async providers list — config providers spread inline, then services.
+    expect(output).toMatch(
+      /providers:\s*\[\s*ApiConfiguration,\s*RequestBuilder,\s*\.\.\.asyncProviders,\s*PostsService,\s*UsersService,?\s*\]/,
     );
-    expect(output).toContain('if (options.useFactory) {');
-    expect(output).toContain(
-      'const inject: (Type<ApiModuleConfigFactory> | string | symbol)[] = [];',
+
+    // Helper function declaration shipped in the same file.
+    expect(output).toMatch(
+      /function createAsyncProviders\(options: ApiModuleAsyncConfig\): Provider\[\]/,
     );
-    // Inline if — no block braces
-    expect(output).toContain('if (options.useExisting)');
-    expect(output).toContain('const asyncProvider: Provider = {');
-    // providers array is emitted multi-line; verify the key entries individually
-    expect(output).toContain('asyncProvider,');
-    expect(output).toContain('...(options.extraProviders ?? [])');
-    expect(output).toContain('return providers;');
+    // It branches on useFactory / useExisting / useClass and forwards extraProviders.
+    expect(output).toMatch(/if \(options\.useFactory\)/);
+    expect(output).toMatch(/if \(options\.useExisting\)/);
+    expect(output).toMatch(/if \(options\.useClass\)/);
   });
 });

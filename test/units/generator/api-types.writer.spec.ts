@@ -51,15 +51,15 @@ describe('ApiTypesWriter', () => {
       'createApiModuleConfig(): Promise<ApiModuleConfig> | ApiModuleConfig;',
     );
 
-    expect(generatedCode).toContain(
-      "export interface ApiModuleAsyncConfig extends Pick<ModuleMetadata, 'imports'>",
+    expect(generatedCode).toMatch(
+      /export interface ApiModuleAsyncConfig\s+extends Pick<ModuleMetadata, 'imports'>/,
     );
     expect(generatedCode).toContain('useExisting?: Type<ApiModuleConfigFactory>;');
     expect(generatedCode).toContain('useClass?: Type<ApiModuleConfigFactory>;');
     expect(generatedCode).toMatch(
-      /useFactory\?:\s*\(\s*\.\.\.args:\s*unknown\[\]\s*\)\s*=>\s*Promise<ApiModuleConfig>\s*\|\s*ApiModuleConfig;/,
+      /useFactory\?:\s*\(\s*\.\.\.args:\s*any\[\]\s*\)\s*=>\s*Promise<ApiModuleConfig>\s*\|\s*ApiModuleConfig;/,
     );
-    expect(generatedCode).toContain('inject?: Array<string | symbol | Type<unknown>>;');
+    expect(generatedCode).toContain('inject?: any[];');
     expect(generatedCode).toContain('extraProviders?: Provider[];');
 
     expect(generatedCode).toContain("export const API_CONFIG = Symbol('API_CONFIG');");

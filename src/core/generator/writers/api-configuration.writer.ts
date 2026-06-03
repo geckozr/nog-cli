@@ -40,33 +40,29 @@ export class ApiConfigurationWriter {
       ts.factory.createIdentifier('API_CONFIG'),
     ]);
 
+    // `private readonly config: ApiModuleConfig = {}` — parameter property with a
+    // default value. Removes the previous body-side `this.config = config ?? {}`
+    // and makes `this.config` non-optional at the type level, so the getters and
+    // buildUrl can drop their optional-chaining.
     const constructorParam = ts.factory.createParameterDeclaration(
-      [injectDecorator, ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword)],
+      [
+        injectDecorator,
+        ts.factory.createModifier(ts.SyntaxKind.PrivateKeyword),
+        ts.factory.createModifier(ts.SyntaxKind.ReadonlyKeyword),
+      ],
       undefined,
       'config',
-      ts.factory.createToken(ts.SyntaxKind.QuestionToken),
+      undefined,
       this.typeBuilder.createReference('ApiModuleConfig'),
-    );
-
-    const constructorBody = ts.factory.createBlock(
-      [
-        ts.factory.createExpressionStatement(
-          ts.factory.createBinaryExpression(
-            ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'config'),
-            ts.factory.createToken(ts.SyntaxKind.EqualsToken),
-            ts.factory.createBinaryExpression(
-              ts.factory.createIdentifier('config'),
-              ts.factory.createToken(ts.SyntaxKind.QuestionQuestionToken),
-              ts.factory.createObjectLiteralExpression(),
-            ),
-          ),
-        ),
-      ],
-      true,
+      ts.factory.createObjectLiteralExpression(),
     );
 
     classElements.push(
-      ts.factory.createConstructorDeclaration(undefined, [constructorParam], constructorBody),
+      ts.factory.createConstructorDeclaration(
+        undefined,
+        [constructorParam],
+        ts.factory.createBlock([], false),
+      ),
     );
 
     const createGetter = (name: string, returnType: ts.TypeNode, fallback: ts.Expression) => {
@@ -79,9 +75,8 @@ export class ApiConfigurationWriter {
           [
             ts.factory.createReturnStatement(
               ts.factory.createBinaryExpression(
-                ts.factory.createPropertyAccessChain(
+                ts.factory.createPropertyAccessExpression(
                   ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'config'),
-                  ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
                   ts.factory.createIdentifier(name),
                 ),
                 ts.factory.createToken(ts.SyntaxKind.QuestionQuestionToken),

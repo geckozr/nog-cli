@@ -52,6 +52,30 @@ This will cause dependency injection errors like:
 Error: Nest can't resolve dependencies of the YourService (?)
 ```
 
+#### Async initialization with NestJS DI
+
+When the configuration depends on another module (e.g. `ConfigModule`), use `forRootAsync`. The signature follows the standard NestJS shape (`inject?: any[]`, `useFactory?: (...args: any[]) => ApiModuleConfig | Promise<ApiModuleConfig>`).
+
+```typescript
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ApiModule } from './api-client/api.module';
+
+@Module({
+  imports: [
+    ApiModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        baseUrl: cs.get<string>('API_URL') ?? '',
+        headers: { 'X-Api-Key': cs.get<string>('API_KEY') ?? '' },
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
 ### 2. Inject services in your controllers/services
 
 ```typescript
@@ -69,27 +93,204 @@ export class MyService {
 }
 ```
 
-### 3. Passing query parameters
+### 3. Passing query parameters and per-call headers
 
-Methods with query parameters use an inline object type for better DX:
+Method signatures keep path parameters positional and group the rest into a `params` wrapper with two optional sub-objects, `query` and `headers`. This separation lets the client serialise query values per OpenAPI 3 styles (`form`, `spaceDelimited`, `pipeDelimited`, `deepObject`, `explode`) while routing headers to the right axios slot.
 
 ```typescript
-// Only pass the parameters you need
-const users = await usersService.searchUsers({
-  fields: ['id', 'name', 'email'],
-  groups: ['members'],
-  pageSize: 20,
+// path params stay positional; query/headers live in their own sub-objects
+const user = await voucherService.verifyVoucher(token, {
+  query: { fields: ['id', 'name'] },
+  headers: { pin: '1234' },
 });
 
-// Parameters are optional - pass none if you want defaults
-const allUsers = await usersService.searchUsers();
-
-// IDE autocomplete and JSDoc for each parameter
-const results = await usersService.searchUsers({
-  keywords: 'john', // <- Hover for description
-  orderBy: 'createdAt', // <- Type-safe enum values
-});
+// pass only what you need — both branches are optional
+const all = await usersService.searchUsers();
+const justQuery = await usersService.searchUsers({ query: { pageSize: 20 } });
 ```
+
+Semantics for `null` vs `undefined` mirror the REST convention:
+
+- `undefined` → the field is omitted from the request (server keeps the existing value).
+- `null` → the field is sent as an empty string (server treats it as "clear / reset"). This is the pattern some REST APIs use to wipe a stored value such as a custom field.
+
+### 4. OpenAPI parameter styles
+
+When the spec sets a non-default `style` or `explode`, the generator emits a styles map on the underlying `RequestBuilder.buildQuery` call and the value is serialised before reaching axios:
+
+| OpenAPI declaration               | Wire format                             |
+| --------------------------------- | --------------------------------------- |
+| `style: form, explode: false`     | `?ids=a,b,c`                            |
+| `style: spaceDelimited`           | `?coords=1%202%203`                     |
+| `style: pipeDelimited`            | `?tags=a%7Cb`                           |
+| `style: deepObject`               | `?filter[name]=x&filter[age]=30`        |
+| default (`form`, `explode: true`) | `?ids=a&ids=b&ids=c` (axios serialises) |
+
+### 5. Extending the SDK with your own interceptor or service
+
+`ApiModule` re-exports `HttpModule`, so `HttpService` is injectable in any provider of a module that imports `ApiModule`. This lets you wire in extras — request interceptors, custom endpoints, anything that needs access to the same axios instance the generated services use — without modifying the generated SDK.
+
+#### Adding an axios request interceptor
+
+Inject `HttpService` and register the interceptor in `OnModuleInit`. NestJS instantiates providers eagerly at boot (default scope), so the lifecycle hook fires automatically and every outbound request goes through the interceptor.
+
+```typescript
+import { Injectable, Module, OnModuleInit } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ApiModule } from './generated/api.module';
+
+@Injectable()
+export class AuthHeaderInterceptor implements OnModuleInit {
+  constructor(private readonly http: HttpService) {}
+
+  onModuleInit(): void {
+    this.http.axiosRef.interceptors.request.use((config) => {
+      config.headers.set('Authorization', `Bearer ${getCurrentToken()}`);
+      return config;
+    });
+  }
+}
+
+@Module({
+  imports: [ApiModule.forRoot({ baseUrl: process.env.API_URL ?? '' })],
+  providers: [AuthHeaderInterceptor],
+})
+export class ApiClientModule {}
+```
+
+#### Adding a custom service that uses the shared HttpService
+
+Sometimes the OpenAPI spec doesn't cover every endpoint your backend exposes (custom routes, dynamic scripts, etc.). Declare your own service alongside `ApiModule` and inject `HttpService` — you'll get the same axios instance the generated services use, with the same `baseUrl` and any interceptors already registered.
+
+```typescript
+import { Injectable, Module } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+import { ApiModule } from './generated/api.module';
+
+@Injectable()
+export class CustomEndpointService {
+  constructor(private readonly http: HttpService) {}
+
+  async runCustom<T>(key: string, params: Record<string, string>): Promise<T> {
+    const response = await firstValueFrom(
+      this.http.post<T>(`/custom/${key}`, undefined, { params }),
+    );
+    return response.data;
+  }
+}
+
+@Module({
+  imports: [ApiModule.forRoot({ baseUrl: process.env.API_URL ?? '' })],
+  providers: [CustomEndpointService],
+  exports: [CustomEndpointService, ApiModule],
+})
+export class ApiClientModule {}
+```
+
+Re-exporting `ApiModule` alongside `CustomEndpointService` lets downstream modules import a single module and get both the generated services and the custom one. The recipes compose — put both providers together if you need both an interceptor and a custom service.
+
+For per-call dynamic headers (auth tokens, tenant IDs, request IDs), use an axios request interceptor as shown above. The interceptor can read from `AsyncLocalStorage`, the request context, or any other dynamic source — the generated services do not need a per-call header argument.
+
+### 6. Using multiple generated clients in the same app
+
+You can host several generated SDKs in the same NestJS app — either because you talk to different backends (e.g. a billing API and an identity API), or because you talk to the same backend under two different configurations (e.g. a "user" client and an "admin" client with different headers). The pattern is the same in both cases: one wrapper module per client, importing the generated `ApiModule.forRoot[Async](...)` with the configuration of that client. Two distinct registrations stay isolated by construction.
+
+#### Different backends
+
+Generate one SDK per OpenAPI spec, giving each a unique module name and output directory:
+
+```bash
+nog-cli generate ./openapi/billing.json  -o ./src/api/billing  -m BillingApiModule
+nog-cli generate ./openapi/identity.json -o ./src/api/identity -m IdentityApiModule
+```
+
+Wrap each one to keep `HttpService` / `RequestBuilder` scoped to that client:
+
+```typescript
+// src/clients/billing-client.module.ts
+@Module({
+  imports: [
+    BillingApiModule.forRoot({ baseUrl: process.env.BILLING_URL ?? '' }),
+  ],
+  providers: [BillingOutboundInterceptor], // sees only the billing axios instance
+  exports: [InvoicesService, PaymentsService], // export only what your app uses
+})
+export class BillingClientModule {}
+
+// src/clients/identity-client.module.ts
+@Module({
+  imports: [
+    IdentityApiModule.forRoot({ baseUrl: process.env.IDENTITY_URL ?? '' }),
+  ],
+  providers: [IdentityOutboundInterceptor],
+  exports: [UsersService],
+})
+export class IdentityClientModule {}
+
+// src/app.module.ts
+@Module({
+  imports: [BillingClientModule, IdentityClientModule],
+})
+export class AppModule {}
+```
+
+The two `HttpService` instances (one per `ApiModule`) never leak into `AppModule`, so consumer-side providers that inject `HttpService` are always unambiguous within their wrapper module.
+
+#### Same backend, two configurations
+
+You don't need to regenerate the SDK twice: a single generated `ApiModule` is enough. Wrap it in two consumer-side modules with different `forRoot[Async]` calls:
+
+```typescript
+// src/clients/user-client.module.ts
+@Module({
+  imports: [
+    ApiModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        baseUrl: cs.get<string>('APP_URL') ?? '',
+        headers: { /* user-tier headers */ },
+      }),
+    }),
+  ],
+  providers: [UserOutboundInterceptor],
+  exports: [/* the user-facing services */],
+})
+export class UserClientModule {}
+
+// src/clients/admin-client.module.ts
+@Module({
+  imports: [
+    ApiModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        baseUrl: cs.get<string>('APP_URL') ?? '',
+        headers: { 'X-Admin-Token': cs.get<string>('ADMIN_TOKEN') ?? '' },
+      }),
+    }),
+  ],
+  providers: [AdminOutboundInterceptor],
+  exports: [/* the admin-only services */],
+})
+export class AdminClientModule {}
+```
+
+Each `ApiModule.forRootAsync(...)` call returns a distinct `DynamicModule` object (NestJS v11 identifies dynamic modules by object reference). Because the configuration providers — `API_CONFIG`, `ApiConfiguration`, `RequestBuilder` — are declared directly on `ApiModule` (no shared sub-module), each wrapper owns its own provider scope and the two configurations stay cleanly separated. Inject a service from `UserClientModule` and you get the user configuration; inject from `AdminClientModule` and you get the admin configuration.
+
+**Alternative: regenerate with a distinct `-m`.** If you'd like physically separate SDK files (different bundle splits, different type names per client, or simply a hard partition on disk), regenerate the spec twice with different module names:
+
+```bash
+nog-cli generate ./openapi/app.json -o ./src/api/user-client  -m UserApiModule
+nog-cli generate ./openapi/app.json -o ./src/api/admin-client -m AdminApiModule
+```
+
+Note that `-m` renames only the outer `*Module` class — the inner service classes (`UsersService`, etc.) keep the same identifier in both outputs, so the consumer needs to alias on import (`import { UsersService as AdminUsersService } from './admin-client/...'`) when both flavours are referenced in the same file. With the wrapper-module pattern above, this isn't needed: a single SDK is enough.
+
+> **Limitation:** assigning a single `ApiModule.forRootAsync(...)` _result_ to a variable and importing the same value in two wrappers shares the configuration — NestJS treats them as the same dynamic module by reference. To get two isolated configurations, call `ApiModule.forRootAsync(...)` twice with separate option objects (as in the example above).
+
+> **Sharp edge — facade-only exports.** Each wrapper module above exports **only its own per-client facade** (or `useExisting`-aliased tokens). Do **not** re-export `ApiModule` or the raw service classes from more than one wrapper. The two configurations are correctly isolated inside their own scopes, but if both wrappers re-export the same service class (e.g. `UsersService`) and a downstream module imports both wrappers, that class token becomes ambiguous in the downstream scope. NestJS does not raise an error in this case — it silently resolves to one of the two registrations, and you may end up using the wrong configuration without warning. This is standard NestJS token-resolution behaviour (cf. the named-connection conventions in `@nestjs/typeorm` / `mongoose` / `bullmq`), not specific to this SDK.
 
 ## Configuration Options
 
@@ -97,83 +298,75 @@ The `ApiModuleConfig` interface accepts:
 
 - `baseUrl` (required): Base URL for all API requests
 - `headers` (optional): Default headers included in all requests
-- `httpOptions` (optional): Additional Axios configuration options
+- `httpOptions` (optional): Additional Axios configuration options (forwarded to the underlying `HttpModule.register({...})` call)
+
+### Customizing the HTTP client
+
+By default, the generated module sets `paramsSerializer: { indexes: null }` so that array query parameters are serialised as `?key=a&key=b` — the OpenAPI 3 default (`style: form, explode: true`). Override only if your backend expects a different format.
+
+```ts
+ApiModule.forRoot({
+  baseUrl: 'https://api.example.com',
+  httpOptions: {
+    timeout: 30_000,
+    paramsSerializer: { indexes: false }, // -> ?key=a,b (CSV)
+  },
+});
+```
+
+For keep-alive connections (Node.js):
+
+```ts
+import { Agent } from 'https';
+
+ApiModule.forRoot({
+  baseUrl: 'https://api.example.com',
+  httpOptions: {
+    httpsAgent: new Agent({ keepAlive: true }),
+  },
+});
+```
+
+Any property in `httpOptions` is splatted **after** the built-in defaults, so user-supplied values take precedence.
 
 ## Error Handling
 
-The generated services throw `ApiException<T>` for HTTP errors, where `T` is the typed error response from your OpenAPI spec:
+The generated services do not wrap HTTP errors. Failed requests bubble up as the native axios `AxiosError`, which carries the response status, headers and body when the server replied (`error.response`), or no `response` field when the request never reached the server (timeout, DNS, network).
 
-```typescript
-import { ApiException } from './api-client/api.exception';
-import { NotFoundError } from './api-client/models/NotFoundError';
-import { UnauthorizedError } from './api-client/models/UnauthorizedError';
+Two idiomatic ways to handle them:
 
-try {
-  const result = await authService.getCurrentAuth();
-} catch (error) {
-  if (error instanceof ApiException) {
-    console.log('Status:', error.status);
-    console.log('Error data:', error.data);
+1. **Local `try`/`catch`** around the Promise variant of a service method:
 
-    // Use helper methods for cleaner code
-    if (error.hasStatus(401)) {
-      const unauthorizedError = error.data as UnauthorizedError;
-      console.log('Error code:', unauthorizedError.code);
-    }
+   ```typescript
+   import axios from 'axios';
 
-    if (error.hasStatus(404)) {
-      const notFoundError = error.data as NotFoundError;
-      console.log('Entity type:', notFoundError.entityType);
-    }
+   try {
+     const user = await usersService.getUser({ query: { id: '42' } });
+   } catch (e) {
+     if (axios.isAxiosError(e) && e.response?.status === 404) {
+       // handle not-found
+     }
+     throw e;
+   }
+   ```
 
-    // Or use the is() helper to check and cast in one step
-    if (error.is<UnauthorizedError>(401)) {
-      console.log('Unauthorized:', error.data.code);
-    }
-  }
-}
-```
+2. **NestJS exception filter** that maps `AxiosError` to your application's HTTP exceptions globally:
 
-### ApiException Helper Methods
+   ```typescript
+   import { ArgumentsHost, Catch, ExceptionFilter } from '@nestjs/common';
+   import { AxiosError } from 'axios';
 
-- `hasStatus(status)` - Check if the exception has a specific HTTP status code
-- `is<T>(status)` - Type guard that checks status and narrows the type of `data` to `T`
+   @Catch(AxiosError)
+   export class AxiosErrorFilter implements ExceptionFilter {
+     catch(error: AxiosError, host: ArgumentsHost): void {
+       const status = error.response?.status ?? 502;
+       const body = error.response?.data ?? { message: error.message };
+       host.switchToHttp().getResponse().status(status).json(body);
+     }
+   }
+   ```
 
-```typescript
-// hasStatus() - simple status check
-if (error.hasStatus(401, 403)) {
-  console.log('Authentication or authorization error');
-}
-
-// is<T>() - status check with type narrowing
-if (error.is<NotFoundError>(404)) {
-  // error.data is now typed as NotFoundError
-  console.log('Entity not found:', error.data.entityType);
-}
-```
-
-### Using with NestJS Exception Filters
-
-You can create a global filter to convert `ApiException` to NestJS exceptions:
-
-```typescript
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
-import { ApiException } from './api-client/api.exception';
-
-@Catch(ApiException)
-export class ApiExceptionFilter implements ExceptionFilter {
-  catch(exception: ApiException, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
-
-    response.status(exception.status).json({
-      statusCode: exception.status,
-      message: exception.message,
-      error: exception.data,
-    });
-  }
-}
-```
+   Register with `app.useGlobalFilters(new AxiosErrorFilter())` or via the `APP_FILTER` provider in any module.
 
 ## Available Services
 

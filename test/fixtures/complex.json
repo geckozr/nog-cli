@@ -279,6 +279,103 @@
           }
         }
       }
+    },
+    "/search/items": {
+      "get": {
+        "summary": "Search items with mixed OpenAPI serialization styles",
+        "operationId": "searchItems",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Array CSV-serialized via form + explode:false",
+            "schema": { "type": "array", "items": { "type": "string" } },
+            "style": "form",
+            "explode": false
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Array pipe-delimited",
+            "schema": { "type": "array", "items": { "type": "string" } },
+            "style": "pipeDelimited"
+          },
+          {
+            "name": "coords",
+            "in": "query",
+            "description": "Array space-delimited",
+            "schema": { "type": "array", "items": { "type": "number" } },
+            "style": "spaceDelimited"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "description": "deepObject expansion (?filter[name]=x)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "min": { "type": "number" }
+              }
+            },
+            "style": "deepObject",
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Plain query param (default form/explode:true)",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matched items",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/User" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/paths/{specialId}/details": {
+      "get": {
+        "summary": "Path param that may contain special characters (encoding test)",
+        "operationId": "getPathDetails",
+        "parameters": [
+          {
+            "name": "specialId",
+            "in": "path",
+            "required": true,
+            "description": "May contain slashes, spaces, reserved chars",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "description": "Custom trace header (must NOT leak into queryParams)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "description": "Plain query alongside header (separation test)",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Path details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

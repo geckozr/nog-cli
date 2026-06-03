@@ -5,10 +5,10 @@
 1. [High-Level Architecture](#high-level-architecture)
 2. [Data Flow Pipeline](#data-flow-pipeline)
 3. [Core Concepts](#core-concepts)
-4. [Directory Structure](#directory-structure)
-5. [Design Decisions](#design-decisions)
-6. [Generated Code Structure](#generated-code-structure)
-7. [Development Patterns](#development-patterns)
+4. [Design Decisions](#design-decisions)
+5. [Directory Structure](#directory-structure)
+6. [Development Patterns](#development-patterns)
+7. [Further Reading](#further-reading)
 
 ## High-Level Architecture
 
@@ -98,9 +98,9 @@ The generator consumes the IR and emits TypeScript code by building ASTs with th
 - **DtoWriter**: Emits DTO classes, enums, and pure-union type aliases.
 - **ServiceWriter**: Emits NestJS Service classes (dual-method: Observable + Promise).
 - **ApiTypesWriter**: Emits the shared `ApiModuleConfig` / `ApiModuleAsyncConfig` interfaces.
-- **ApiConfigurationWriter**: Emits the injectable `ApiConfiguration` token.
-- **ApiUtilsWriter**: Emits helper utilities (query/path/header param builders).
-- **ApiModuleWriter**: Emits the NestJS `ApiModule` with `forRoot` / `forRootAsync` factory methods.
+- **ApiConfigurationWriter**: Emits the injectable `ApiConfiguration` token as a thin config holder: three getters (`baseUrl`, `headers`, `httpOptions`) backed by the `@Inject(API_CONFIG)`-resolved record. URL/query/header shaping does not live here — it is centralised in `RequestBuilder` so the config class stays stateless and free of HTTP concerns.
+- **RequestBuilderWriter**: Emits `request-builder.service.ts` — a stateless `@Injectable()` helper with three public methods (`buildUrl`, `buildQuery`, `buildHeaders`) and an exported `ParamStyle = 'csv' | 'space' | 'pipe' | 'deep'` union for the non-default OpenAPI 3 serialization styles. `buildUrl` interpolates `{name}` placeholders with `encodeURIComponent` (RFC 3986 path-segment encoding); missing keys are left as literal placeholders and `null`/`undefined` collapse to empty strings (permissive contract). `buildQuery` picks listed keys from `params?.query` with `undefined → omit`, `null → ''` (clear-semantic, matches the "wipe a field" convention common in REST APIs) and applies the styles map for `csv`/`space`/`pipe`/`deep` (default `form+explode:true` passes through to axios). `buildHeaders` composes `this.config.headers` with per-call `params?.headers` extras and stringifies values; Accept / Content-Type assignments are emitted after the call so they always override consumer input.
+- **ApiModuleWriter**: Emits the NestJS `ApiModule` with `forRoot` / `forRootAsync` factory methods. The configuration providers (`API_CONFIG`, `ApiConfiguration`, `RequestBuilder`) are declared directly on the module — no sub-module indirection — so each `forRoot[Async]` call owns its own provider scope and two distinct registrations stay isolated under NestJS v11 reference-equality dedup. `forRootAsync` builds the async providers once via the inline `createAsyncProviders` helper and shares the same array reference between `module.providers` and `HttpModule.registerAsync({ extraProviders })`; that shared reference is what makes NestJS materialise the `API_CONFIG` provider once per registration, so the consumer-supplied `useFactory` fires exactly once.
 - **IndexWriter**: Emits barrel export files (`index.ts`).
 
 Each writer is composed from small, reusable builders under `src/core/generator/writers/core/` (`AstPrinter`, `DeclarationBuilder`, `DecoratorBuilder`, `ImportBuilder`, `ParameterBuilder`, `PropertyBuilder`, `ServiceMethodBuilder`, `ServiceStatementBuilder`, `TypeBuilder`, `ExpressionBuilder`, `HeaderGenerator`, `CommentModifier`) which are injected through the constructor.
@@ -346,11 +346,12 @@ src/
 │   │   ├── spec.loader.ts       # I/O: FileSystem & HTTP loading
 │   │   └── openapi.parser.ts    # Parsing & Bundle via swagger-parser
 │   ├── ir/               # [Layer 2] Intermediate Representation
-│   │   ├── interfaces/
-│   │   │   └── models.ts        # TYPES ONLY: Defines IrModel, IrService
+│   │   ├── interfaces/          # TYPES ONLY: IR types (IrModel, IrService, …)
+│   │   │   ├── models.ts
+│   │   │   ├── services.ts
+│   │   │   └── validator-map.ts # Maps constraints to class-validator
 │   │   ├── analyzer/            # Helpers for type mapping & analysis
 │   │   │   ├── type.mapper.ts   # Maps OpenAPI types to IR types
-│   │   │   ├── validator.map.ts # Maps constraints to class-validator
 │   │   │   └── schema.merger.ts # Handles allOf, oneOf, anyOf
 │   │   └── openapi.converter.ts # LOGIC: OpenAPI -> IR Transformer
 │   └── generator/        # [Layer 3] Code Emission (ts.factory + Prettier)
@@ -375,8 +376,8 @@ src/
 │           ├── service.writer.ts      # Writes *.service.ts
 │           ├── api-module.writer.ts   # Writes api.module.ts
 │           ├── api-configuration.writer.ts # Writes api.configuration.ts
+│           ├── request-builder.writer.ts   # Writes request-builder.service.ts
 │           ├── api-types.writer.ts    # Writes api.types.ts
-│           ├── api-utils.writer.ts    # Writes api.utils.ts
 │           └── index.writer.ts        # Writes index.ts barrels
 └── utils/                # Shared utilities (Logger, Naming, FS)
     ├── logger.ts
@@ -388,7 +389,6 @@ test/
 │   └── generator.e2e-spec.ts     # End-to-end test suite
 ├── fixtures/
 │   ├── petstore.json             # Standard test spec
-│   ├── cyclos.json               # Real-world complex spec
 │   └── complex.json              # Edge case spec
 └── units/
     ├── parser/                   # Parser unit tests

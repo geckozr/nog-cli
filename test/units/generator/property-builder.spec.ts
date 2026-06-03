@@ -74,6 +74,24 @@ describe('PropertyBuilder', () => {
     expect(result.generatedCode).toContain('public email!: string;');
   });
 
+  it('should emit declare modifier when isRedeclared is true', async () => {
+    const node = propertyBuilder.create('inheritedField', stringTypeNode, {
+      isRedeclared: true,
+      isOptional: true,
+    });
+    const result = await printer.print([wrapInClass(node)]);
+
+    expect(result.generatedCode).toContain('declare public inheritedField?: string;');
+  });
+
+  it('should omit declare modifier when isRedeclared is false or undefined', async () => {
+    const node = propertyBuilder.create('ownField', stringTypeNode, { isOptional: true });
+    const result = await printer.print([wrapInClass(node)]);
+
+    expect(result.generatedCode).not.toContain('declare');
+    expect(result.generatedCode).toContain('public ownField?: string;');
+  });
+
   it('should combine all options correctly', async () => {
     const mockDecorator = ts.factory.createDecorator(
       ts.factory.createCallExpression(ts.factory.createIdentifier('IsOptional'), undefined, []),

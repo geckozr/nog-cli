@@ -9,7 +9,6 @@ coverage/
 # Test and coverage
 /coverage
 /test-output
-/test-output-baseline
 /.vitest
 /.vscode
 

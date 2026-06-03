@@ -1,15 +1,30 @@
 import ts from 'typescript';
 
+import { IrParameter } from '../../../ir/interfaces/services';
+
+export interface QueryParamMeta {
+  style?: IrParameter['style'];
+  explode?: boolean;
+}
+
 export interface HttpCallConfig {
   httpMethod: string;
   urlVar?: string;
   bodyVar?: string;
   queryParams?: string[];
+  queryParamMeta?: Record<string, QueryParamMeta>;
   headerParams?: string[];
   hasOptionalParams?: boolean;
   acceptHeader?: string;
   contentTypeHeader?: string;
   responseType?: string;
+  /**
+   * True when the operation declares a `multipart/form-data` or
+   * `application/x-www-form-urlencoded` request body. Currently informational —
+   * the multipart body is delegated to axios auto-serialization via the
+   * `Content-Type` header. The flag is preserved so we can branch on it if a
+   * future change swaps axios for another HTTP client.
+   */
   isFormData?: boolean;
   returnType?: ts.TypeNode;
 }
@@ -20,80 +35,35 @@ export interface HttpCallConfig {
  */
 export class ServiceStatementBuilder {
   /**
-   * Generates: const path = `/users/${id}`;
-   * @param pathTemplate The OpenAPI path string (e.g. /users/{id})
+   * Emits a relative path; axios prepends `baseURL` from `HttpModule.register`.
    */
-  public buildPathConst(pathTemplate: string): ts.VariableStatement {
-    const tsTemplateString = pathTemplate.replace(/{([^}]+)}/g, '$${$1}');
+  public buildUrlStatements(
+    pathTemplate: string,
+    pathParamNames: string[] = [],
+  ): ts.VariableStatement[] {
+    const args: ts.Expression[] = [ts.factory.createStringLiteral(pathTemplate)];
 
-    return ts.factory.createVariableStatement(
-      undefined,
-      ts.factory.createVariableDeclarationList(
-        [
-          ts.factory.createVariableDeclaration(
-            'path',
-            undefined,
-            undefined,
-            ts.factory.createIdentifier(`\`${tsTemplateString}\``),
+    if (pathParamNames.length > 0) {
+      args.push(
+        ts.factory.createObjectLiteralExpression(
+          pathParamNames.map((name) =>
+            ts.factory.createShorthandPropertyAssignment(ts.factory.createIdentifier(name)),
           ),
-        ],
-        ts.NodeFlags.Const,
-      ),
-    );
-  }
-
-  /**
-   * Generates URL construction with baseUrl normalization:
-   *   const normalizedBase = (this.config.baseUrl ?? '').replace(/\/$/, '');
-   *   const normalizedPath = `/path/${id}`.replace(/^\//, '');
-   *   const url = normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`;
-   */
-  public buildUrlStatements(pathTemplate: string): ts.VariableStatement[] {
-    const tsTemplateString = pathTemplate.replace(/{([^}]+)}/g, '$${$1}');
-
-    // (this.config.baseUrl ?? '').replace(/\/$/, '')
-    const baseUrlExpr = ts.factory.createCallExpression(
-      ts.factory.createPropertyAccessExpression(
-        ts.factory.createParenthesizedExpression(
-          ts.factory.createBinaryExpression(
-            ts.factory.createPropertyAccessExpression(
-              ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'config'),
-              'baseUrl',
-            ),
-            ts.SyntaxKind.QuestionQuestionToken,
-            ts.factory.createStringLiteral(''),
-          ),
+          false,
         ),
-        'replace',
-      ),
-      undefined,
-      [ts.factory.createRegularExpressionLiteral('/\\/$/'), ts.factory.createStringLiteral('')],
-    );
+      );
+    }
 
-    // `/path/${id}`.replace(/^\//, '')
-    const pathExpr = ts.factory.createCallExpression(
+    const buildUrlCall = ts.factory.createCallExpression(
       ts.factory.createPropertyAccessExpression(
-        ts.factory.createIdentifier(`\`${tsTemplateString}\``),
-        'replace',
+        ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'rb'),
+        'buildUrl',
       ),
       undefined,
-      [ts.factory.createRegularExpressionLiteral('/^\\//'), ts.factory.createStringLiteral('')],
+      args,
     );
 
-    // normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`
-    const urlExpr = ts.factory.createConditionalExpression(
-      ts.factory.createIdentifier('normalizedBase'),
-      ts.factory.createToken(ts.SyntaxKind.QuestionToken),
-      ts.factory.createIdentifier('`${normalizedBase}/${normalizedPath}`'),
-      ts.factory.createToken(ts.SyntaxKind.ColonToken),
-      ts.factory.createIdentifier('`/${normalizedPath}`'),
-    );
-
-    return [
-      this.buildConstDeclaration('normalizedBase', baseUrlExpr),
-      this.buildConstDeclaration('normalizedPath', pathExpr),
-      this.buildConstDeclaration('url', urlExpr),
-    ];
+    return [this.buildConstDeclaration('url', buildUrlCall)];
   }
 
   /**
@@ -117,7 +87,6 @@ export class ServiceStatementBuilder {
       [methodCall],
     );
 
-    // Type the callback parameter as AxiosResponse<T> to avoid implicit any
     const resType = returnType
       ? ts.factory.createTypeReferenceNode('AxiosResponse', [returnType])
       : undefined;
@@ -150,15 +119,18 @@ export class ServiceStatementBuilder {
 
   /**
    * Generates all statements for the Observable method body:
-   * - Query params extraction from `params` into a separate object
-   * - Headers setup (config.headers spread + Accept/Content-Type + custom header params)
+   * - Query params extraction via `this.rb.buildQuery(params?.query, [...] as const)`
+   * - Headers setup: `this.rb.buildHeaders` when header params exist, plain spread otherwise
+   * - Accept / Content-Type assignments (after buildHeaders so they override)
    * - HTTP return statement with generic type
    */
   public buildHttpCall(config: HttpCallConfig): ts.Statement[] {
     const statements: ts.Statement[] = [];
 
     if (config.queryParams && config.queryParams.length > 0) {
-      statements.push(...this.buildQueryParamsExtraction(config.queryParams));
+      statements.push(
+        ...this.buildQueryParamsExtraction(config.queryParams, config.queryParamMeta),
+      );
     }
 
     statements.push(...this.buildHeadersSetup(config));
@@ -169,160 +141,167 @@ export class ServiceStatementBuilder {
 
   /**
    * Generates:
-   *   const queryParams: Record<string, any> = {};
-   *   if (params) {
-   *     if (params.field !== undefined) queryParams['field'] = params.field;
-   *     ...
-   *   }
+   *   const queryParams = this.rb.buildQuery(params?.query, ['field1', 'field2'] as const);
+   * Or, when at least one key has a non-default OpenAPI style/explode combination:
+   *   const queryParams = this.rb.buildQuery(params?.query, [...] as const, { field1: 'csv' });
    */
-  private buildQueryParamsExtraction(paramNames: string[]): ts.Statement[] {
-    // const queryParams: Record<string, any> = {};
-    const declaration = ts.factory.createVariableStatement(
-      undefined,
-      ts.factory.createVariableDeclarationList(
-        [
-          ts.factory.createVariableDeclaration(
-            'queryParams',
-            undefined,
-            ts.factory.createTypeReferenceNode('Record', [
-              ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
-              ts.factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
-            ]),
-            ts.factory.createObjectLiteralExpression([]),
-          ),
-        ],
-        ts.NodeFlags.Const,
+  private buildQueryParamsExtraction(
+    paramNames: string[],
+    meta: Record<string, QueryParamMeta> | undefined,
+  ): ts.Statement[] {
+    const keysArray = ts.factory.createAsExpression(
+      ts.factory.createArrayLiteralExpression(
+        paramNames.map((name) => ts.factory.createStringLiteral(name)),
+        false,
       ),
+      ts.factory.createTypeReferenceNode('const'),
     );
 
-    // if (params) { if (params.X !== undefined) queryParams['X'] = params.X; ... }
-    const assignments = paramNames.map((name) =>
-      ts.factory.createIfStatement(
-        ts.factory.createBinaryExpression(
-          ts.factory.createPropertyAccessExpression(ts.factory.createIdentifier('params'), name),
-          ts.SyntaxKind.ExclamationEqualsEqualsToken,
-          ts.factory.createIdentifier('undefined'),
-        ),
-        ts.factory.createExpressionStatement(
-          ts.factory.createBinaryExpression(
-            ts.factory.createElementAccessExpression(
-              ts.factory.createIdentifier('queryParams'),
+    const args: ts.Expression[] = [
+      ts.factory.createPropertyAccessChain(
+        ts.factory.createIdentifier('params'),
+        ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
+        ts.factory.createIdentifier('query'),
+      ),
+      keysArray,
+    ];
+
+    const stylesEntries = meta
+      ? paramNames
+          .map((name) => {
+            const shortName = this.toShortStyle(meta[name]);
+            if (!shortName) return null;
+            return ts.factory.createPropertyAssignment(
               ts.factory.createStringLiteral(name),
-            ),
-            ts.SyntaxKind.EqualsToken,
-            ts.factory.createPropertyAccessExpression(ts.factory.createIdentifier('params'), name),
-          ),
-        ),
+              ts.factory.createStringLiteral(shortName),
+            );
+          })
+          .filter((entry): entry is ts.PropertyAssignment => entry !== null)
+      : [];
+
+    if (stylesEntries.length > 0) {
+      args.push(ts.factory.createObjectLiteralExpression(stylesEntries, false));
+    }
+
+    const callExpr = ts.factory.createCallExpression(
+      ts.factory.createPropertyAccessExpression(
+        ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'rb'),
+        'buildQuery',
       ),
+      undefined,
+      args,
     );
 
-    const ifBlock = ts.factory.createIfStatement(
-      ts.factory.createIdentifier('params'),
-      ts.factory.createBlock(assignments, true),
-    );
-
-    return [declaration, ifBlock];
+    return [this.buildConstDeclaration('queryParams', callExpr)];
   }
 
   /**
-   * Generates:
+   * Maps an OpenAPI 3 (style, explode) pair to the short identifier used by the
+   * generated `RequestBuilder.buildQuery` styles map. The default `form` + `explode:true`
+   * is intentionally not represented — it goes through axios serialization untouched.
+   */
+  private toShortStyle(
+    meta: QueryParamMeta | undefined,
+  ): 'csv' | 'space' | 'pipe' | 'deep' | undefined {
+    if (!meta) return undefined;
+    const style = meta.style ?? 'form';
+    if (style === 'form' && meta.explode === false) return 'csv';
+    if (style === 'spaceDelimited') return 'space';
+    if (style === 'pipeDelimited') return 'pipe';
+    if (style === 'deepObject') return 'deep';
+    return undefined;
+  }
+
+  /**
+   * Generates either:
+   *   const headers = this.rb.buildHeaders(this.config.headers, params?.headers, ['X-Trace'] as const);
+   * when header params exist, or the plain spread baseline:
    *   const headers: Record<string, string> = { ...(this.config.headers ?? {}) };
-   *   headers['Accept'] = 'application/json';          // if acceptHeader
-   *   headers['Content-Type'] = 'text/plain';          // if contentTypeHeader (filtered)
-   *   if (params) {                                    // if headerParams
-   *     if (params['X'] !== undefined) headers['X'] = String(params['X']);
-   *   }
+   *
+   * Accept / Content-Type assignments are emitted afterwards so they always override
+   * consumer-provided values — the OpenAPI contract wins to prevent accidental
+   * protocol breakage.
    */
   private buildHeadersSetup(config: HttpCallConfig): ts.Statement[] {
     const statements: ts.Statement[] = [];
 
-    // const headers: Record<string, string> = { ...(this.config.headers ?? {}) };
-    statements.push(
-      ts.factory.createVariableStatement(
-        undefined,
-        ts.factory.createVariableDeclarationList(
-          [
-            ts.factory.createVariableDeclaration(
-              'headers',
-              undefined,
-              ts.factory.createTypeReferenceNode('Record', [
-                ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
-                ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
-              ]),
-              ts.factory.createObjectLiteralExpression([
-                ts.factory.createSpreadAssignment(
-                  ts.factory.createParenthesizedExpression(
-                    ts.factory.createBinaryExpression(
-                      ts.factory.createPropertyAccessExpression(
-                        ts.factory.createPropertyAccessExpression(
-                          ts.factory.createThis(),
-                          'config',
-                        ),
-                        'headers',
-                      ),
-                      ts.SyntaxKind.QuestionQuestionToken,
-                      ts.factory.createObjectLiteralExpression([]),
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-          ],
-          ts.NodeFlags.Const,
+    if (config.headerParams && config.headerParams.length > 0) {
+      const keysArray = ts.factory.createAsExpression(
+        ts.factory.createArrayLiteralExpression(
+          config.headerParams.map((name) => ts.factory.createStringLiteral(name)),
+          false,
         ),
-      ),
-    );
+        ts.factory.createTypeReferenceNode('const'),
+      );
 
-    // headers['Accept'] = '...';
+      const buildHeadersCall = ts.factory.createCallExpression(
+        ts.factory.createPropertyAccessExpression(
+          ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'rb'),
+          'buildHeaders',
+        ),
+        undefined,
+        [
+          ts.factory.createPropertyAccessExpression(
+            ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'config'),
+            'headers',
+          ),
+          ts.factory.createPropertyAccessChain(
+            ts.factory.createIdentifier('params'),
+            ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
+            ts.factory.createIdentifier('headers'),
+          ),
+          keysArray,
+        ],
+      );
+
+      statements.push(this.buildConstDeclaration('headers', buildHeadersCall));
+    } else {
+      statements.push(
+        ts.factory.createVariableStatement(
+          undefined,
+          ts.factory.createVariableDeclarationList(
+            [
+              ts.factory.createVariableDeclaration(
+                'headers',
+                undefined,
+                ts.factory.createTypeReferenceNode('Record', [
+                  ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+                  ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+                ]),
+                ts.factory.createObjectLiteralExpression(
+                  [
+                    ts.factory.createSpreadAssignment(
+                      ts.factory.createParenthesizedExpression(
+                        ts.factory.createBinaryExpression(
+                          ts.factory.createPropertyAccessExpression(
+                            ts.factory.createPropertyAccessExpression(
+                              ts.factory.createThis(),
+                              'config',
+                            ),
+                            'headers',
+                          ),
+                          ts.SyntaxKind.QuestionQuestionToken,
+                          ts.factory.createObjectLiteralExpression([]),
+                        ),
+                      ),
+                    ),
+                  ],
+                  true,
+                ),
+              ),
+            ],
+            ts.NodeFlags.Const,
+          ),
+        ),
+      );
+    }
+
     if (config.acceptHeader) {
       statements.push(this.buildHeaderAssignment('Accept', config.acceptHeader));
     }
 
-    // headers['Content-Type'] = '...' — skip application/json (Axios default) and multipart/form-data (Axios sets boundary)
-    if (
-      config.contentTypeHeader &&
-      config.contentTypeHeader !== 'application/json' &&
-      config.contentTypeHeader !== 'multipart/form-data'
-    ) {
+    if (config.contentTypeHeader && config.contentTypeHeader !== 'application/json') {
       statements.push(this.buildHeaderAssignment('Content-Type', config.contentTypeHeader));
-    }
-
-    // Extract header params from the params object
-    if (config.headerParams && config.headerParams.length > 0) {
-      const headerAssignments = config.headerParams.map((name) =>
-        ts.factory.createIfStatement(
-          ts.factory.createBinaryExpression(
-            ts.factory.createElementAccessExpression(
-              ts.factory.createIdentifier('params'),
-              ts.factory.createStringLiteral(name),
-            ),
-            ts.SyntaxKind.ExclamationEqualsEqualsToken,
-            ts.factory.createIdentifier('undefined'),
-          ),
-          ts.factory.createExpressionStatement(
-            ts.factory.createBinaryExpression(
-              ts.factory.createElementAccessExpression(
-                ts.factory.createIdentifier('headers'),
-                ts.factory.createStringLiteral(name),
-              ),
-              ts.SyntaxKind.EqualsToken,
-              ts.factory.createCallExpression(ts.factory.createIdentifier('String'), undefined, [
-                ts.factory.createElementAccessExpression(
-                  ts.factory.createIdentifier('params'),
-                  ts.factory.createStringLiteral(name),
-                ),
-              ]),
-            ),
-          ),
-        ),
-      );
-
-      statements.push(
-        ts.factory.createIfStatement(
-          ts.factory.createIdentifier('params'),
-          ts.factory.createBlock(headerAssignments, true),
-        ),
-      );
     }
 
     return statements;
@@ -350,7 +329,6 @@ export class ServiceStatementBuilder {
   private buildHttpReturnStatement(config: HttpCallConfig): ts.ReturnStatement {
     const configProperties: ts.ObjectLiteralElementLike[] = [];
 
-    // ...this.config.httpOptions (first — can be overridden by explicit params/headers)
     configProperties.push(
       ts.factory.createSpreadAssignment(
         ts.factory.createPropertyAccessExpression(
@@ -360,17 +338,14 @@ export class ServiceStatementBuilder {
       ),
     );
 
-    // params: queryParams (references the extracted object)
     if (config.queryParams && config.queryParams.length > 0) {
       configProperties.push(
         ts.factory.createPropertyAssignment('params', ts.factory.createIdentifier('queryParams')),
       );
     }
 
-    // headers (shorthand — references the const declared in buildHeadersSetup)
     configProperties.push(ts.factory.createShorthandPropertyAssignment('headers'));
 
-    // responseType: '...'
     if (config.responseType) {
       configProperties.push(
         ts.factory.createPropertyAssignment(
@@ -382,7 +357,6 @@ export class ServiceStatementBuilder {
 
     const axiosConfigObj = ts.factory.createObjectLiteralExpression(configProperties, false);
 
-    // Build method arguments: (url, body?, config)
     const methodArgs: ts.Expression[] = [ts.factory.createIdentifier(config.urlVar || 'url')];
 
     const hasBody = ['post', 'put', 'patch'].includes(config.httpMethod.toLowerCase());
@@ -392,7 +366,6 @@ export class ServiceStatementBuilder {
 
     methodArgs.push(axiosConfigObj);
 
-    // this.httpService.get<ReturnType>(url, config)
     const httpCall = ts.factory.createCallExpression(
       ts.factory.createPropertyAccessExpression(
         ts.factory.createPropertyAccessExpression(ts.factory.createThis(), 'httpService'),
@@ -406,28 +379,14 @@ export class ServiceStatementBuilder {
   }
 
   /**
-   * Builds the body argument for HTTP methods.
-   * For multipart/form-data: body ? toFormData(body) : undefined
-   * For regular bodies: body or undefined
+   * Builds the body argument for HTTP methods. Multipart bodies are passed
+   * raw — axios auto-serializes when the `Content-Type: multipart/form-data`
+   * header is present (emitted in `buildHeadersSetup`).
    */
   private buildBodyExpression(config: HttpCallConfig): ts.Expression {
-    if (!config.bodyVar) {
-      return ts.factory.createIdentifier('undefined');
-    }
-
-    if (config.isFormData) {
-      return ts.factory.createConditionalExpression(
-        ts.factory.createIdentifier(config.bodyVar),
-        ts.factory.createToken(ts.SyntaxKind.QuestionToken),
-        ts.factory.createCallExpression(ts.factory.createIdentifier('toFormData'), undefined, [
-          ts.factory.createIdentifier(config.bodyVar),
-        ]),
-        ts.factory.createToken(ts.SyntaxKind.ColonToken),
-        ts.factory.createIdentifier('undefined'),
-      );
-    }
-
-    return ts.factory.createIdentifier(config.bodyVar);
+    return config.bodyVar
+      ? ts.factory.createIdentifier(config.bodyVar)
+      : ts.factory.createIdentifier('undefined');
   }
 
   private buildConstDeclaration(name: string, initializer: ts.Expression): ts.VariableStatement {

@@ -253,10 +253,15 @@ export class OpenApiConverter {
     // or typically just the first one. Here we iterate all.
     tags.forEach((tag) => {
       const serviceName = `${toPascalCase(tag)}Service`;
+      const serviceFileName = `${toKebabCase(tag)}.service`;
 
       // Ensure service exists
       if (!servicesMap.has(serviceName)) {
-        servicesMap.set(serviceName, { name: serviceName, operations: new Map() });
+        servicesMap.set(serviceName, {
+          name: serviceName,
+          fileName: serviceFileName,
+          operations: new Map(),
+        });
       }
       const service = servicesMap.get(serviceName)!;
 
@@ -483,15 +488,32 @@ export class OpenApiConverter {
         paramObj = param as OpenAPIV3.ParameterObject;
       }
 
-      parameters.push({
+      const paramIn = paramObj.in as IrParameter['in'];
+      const ir: IrParameter = {
         name: paramObj.name,
         type: paramObj.schema
           ? TypeMapper.map(paramObj.schema, this.modelsRegistry)
           : { rawType: 'any', isArray: false, isPrimitive: true },
-        in: paramObj.in as 'query' | 'path' | 'header',
-        isRequired: paramObj.required || paramObj.in === 'path',
+        in: paramIn,
+        isRequired: paramObj.required || paramIn === 'path',
         description: paramObj.description,
-      });
+      };
+
+      // OpenAPI 3.0 serialization metadata — stored only when it differs from the
+      // spec defaults for `in`. Defaults: form/explode:true for query; simple/explode:false otherwise.
+      const defaultStyle: IrParameter['style'] = paramIn === 'query' ? 'form' : 'simple';
+      const defaultExplode = defaultStyle === 'form';
+      if (paramObj.style && paramObj.style !== defaultStyle) {
+        ir.style = paramObj.style as IrParameter['style'];
+      }
+      if (paramObj.explode !== undefined && paramObj.explode !== defaultExplode) {
+        ir.explode = paramObj.explode;
+      }
+      if (paramObj.allowReserved === true) {
+        ir.allowReserved = true;
+      }
+
+      parameters.push(ir);
     }
 
     // Handle Request Body

@@ -64,7 +64,7 @@ describe('DtoWriter', () => {
       ],
     };
 
-    const output = await writer.write(mockModel, [], '1.0.0', 'OpenaApi TEST', '3.1.0');
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenaApi TEST', '3.1.0');
 
     expect(output.generatedCode).toContain(
       'generated with nog-cli v1.0.0 - spec: OpenaApi TEST v3.1.0',
@@ -120,7 +120,14 @@ describe('DtoWriter', () => {
       },
     ];
 
-    const output = await writer.write(mockModel, mockedModels, '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
 
     expect(output.generatedCode).toContain(
       "import { AccountWithCurrency } from './account-with-currency.dto';",
@@ -148,7 +155,14 @@ describe('DtoWriter', () => {
       },
     ];
 
-    const output = await writer.write(mockModel, mockedModels, '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
 
     expect(output.generatedCode).toMatch(/\/\*\*[\s\S]*?A very special account model[\s\S]*?\*\//);
     expect(output.generatedCode).toContain(
@@ -157,6 +171,55 @@ describe('DtoWriter', () => {
     expect(output.generatedCode).toContain(
       'export class SpecialAccountDto extends BaseAccountDto {',
     );
+  });
+
+  it('should emit declare modifier on properties listed in inheritedProperties', async () => {
+    const mockModel: IrModel = {
+      name: 'PhoneViewDto',
+      fileName: 'phone-view-dto',
+      isEnum: false,
+      extends: 'PhoneResultDto',
+      properties: [
+        {
+          name: 'name',
+          type: { rawType: 'string', isArray: false, isPrimitive: true },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+        {
+          name: 'verified',
+          type: { rawType: 'boolean', isArray: false, isPrimitive: true },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+        {
+          name: 'canEdit',
+          type: { rawType: 'boolean', isArray: false, isPrimitive: true },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+      ],
+    };
+    const mockedModels: IrModel[] = [
+      { name: 'PhoneResultDto', fileName: 'phone-result-dto', isEnum: false, properties: [] },
+    ];
+
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(['name', 'verified']),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
+
+    expect(output.generatedCode).toMatch(/declare public name\?: string;/);
+    expect(output.generatedCode).toMatch(/declare public verified\?: boolean;/);
+    expect(output.generatedCode).not.toMatch(/declare public canEdit/);
+    expect(output.generatedCode).toMatch(/\n {2}public canEdit\?: boolean;/);
   });
 
   it('should generate an enum when isEnum is true', async () => {
@@ -169,7 +232,7 @@ describe('DtoWriter', () => {
       properties: [],
     };
 
-    const output = await writer.write(mockModel, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenAPI TEST', '3.1.0');
 
     expect(output.generatedCode).toMatch(/\/\*\*[\s\S]*?The user role enum[\s\S]*?\*\//);
     expect(output.generatedCode).toContain('export enum UserRole {');
@@ -222,7 +285,14 @@ describe('DtoWriter', () => {
       },
     ];
 
-    const output = await writer.write(mockModel, mockedModels, '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
 
     expect(output.generatedCode).toContain("import { Type } from 'class-transformer';");
     expect(output.generatedCode).toContain("import { BaseTraits } from './base-traits.dto';");
@@ -288,7 +358,7 @@ describe('DtoWriter', () => {
     const start = performance.now();
     for (let i = 0; i < iterations; i++) {
       complexModel.name = `ComplexPerformanceDto${i}`;
-      await writer.write(complexModel, [], '1.0.0', 'OpenAPI Benchmark', '3.1.0');
+      await writer.write(complexModel, [], new Set(), '1.0.0', 'OpenAPI Benchmark', '3.1.0');
     }
     const end = performance.now();
     const duration = end - start;
@@ -311,7 +381,7 @@ describe('DtoWriter', () => {
       ],
     };
 
-    const output = await writer.write(mockModel, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenAPI TEST', '3.1.0');
 
     // Verify correct kebab-case imports for subtypes
     // Note: The writer uses `toKebabCase(st.name)` to build the path
@@ -362,7 +432,7 @@ describe('DtoWriter', () => {
       ],
     };
 
-    const output = await writer.write(mockModel, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenAPI TEST', '3.1.0');
 
     // Check identifiers without anchoring on the full line so adding
     // adjacent decorators (e.g. IsNotEmpty) won't break the assertions.
@@ -442,7 +512,14 @@ describe('DtoWriter', () => {
       { name: 'ConfigB', fileName: 'config-b', isEnum: false, properties: [] },
     ];
 
-    const output = await writer.write(mockModel, mockedModels, '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
 
     // Verify that the custom types inside Records and Intersections are correctly extracted and imported
     expect(output.generatedCode).toContain("import { UserDto } from './user-dto.dto';");
@@ -484,7 +561,7 @@ describe('DtoWriter', () => {
       ],
     };
 
-    const output = await writer.write(mockModel, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenAPI TEST', '3.1.0');
 
     expect(output.generatedCode).toContain('@Matches(/^[A-Z]{3}$/)');
     expect(output.generatedCode).toContain("@IsEmail('Invalid email format')");
@@ -520,8 +597,22 @@ describe('DtoWriter', () => {
       properties: [],
     };
 
-    const outputDto = await writer.write(mockModel, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
-    const outputEnum = await writer.write(mockEmptyEnum, [], '1.0.0', 'OpenAPI TEST', '3.1.0');
+    const outputDto = await writer.write(
+      mockModel,
+      [],
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
+    const outputEnum = await writer.write(
+      mockEmptyEnum,
+      [],
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
 
     // The class uses the type name but does NOT emit a broken import for it.
     expect(outputDto.generatedCode).toContain('public ghostProperty!: GhostModel;');

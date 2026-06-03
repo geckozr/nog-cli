@@ -43,14 +43,14 @@ describe('ApiConfigurationWriter', () => {
     expect(generatedCode).toContain('@Injectable()');
     expect(generatedCode).toContain('export class ApiConfiguration {');
     expect(generatedCode).toMatch(
-      /constructor(\s*)?\((\s*)?@Inject\(API_CONFIG\)(\s*)?readonly config\?: ApiModuleConfig,?(\s*)\)(\s*){/gm,
+      /constructor\s*\(\s*@Inject\(API_CONFIG\)\s+private\s+readonly\s+config:\s*ApiModuleConfig\s*=\s*\{\},?\s*\)\s*\{\s*\}/m,
     );
-    expect(generatedCode).toContain('this.config = config ?? {};');
+    expect(generatedCode).not.toContain('this.config = config ?? {};');
     expect(generatedCode).toContain('get baseUrl(): string {');
-    expect(generatedCode).toContain("return this.config?.baseUrl ?? '';");
+    expect(generatedCode).toContain("return this.config.baseUrl ?? '';");
     expect(generatedCode).toContain('get headers(): ApiHeaders {');
-    expect(generatedCode).toContain('return this.config?.headers ?? {};');
+    expect(generatedCode).toContain('return this.config.headers ?? {};');
     expect(generatedCode).toContain('get httpOptions(): AxiosRequestConfig {');
-    expect(generatedCode).toContain('return this.config?.httpOptions ?? {};');
+    expect(generatedCode).toContain('return this.config.httpOptions ?? {};');
   });
 });

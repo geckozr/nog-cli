@@ -1,6 +1,6 @@
 import ts from 'typescript';
 
-import { toKebabCase, toPascalCase } from '../../../utils/naming';
+import { toPascalCase } from '../../../utils/naming';
 import { IrService } from '../../ir';
 import { AstPrinter, IAstPrintedFile } from './core/ast-printer';
 import { DecoratorBuilder } from './core/decorator-builder';
@@ -18,8 +18,14 @@ export class ApiModuleWriter {
   ) {}
 
   /**
-   * Generates the `api.module.ts` file containing the NestJS dynamic module class
-   * and the `createAsyncProviders` helper function.
+   * Generates the `api.module.ts` NestJS dynamic module. The configuration
+   * providers (`API_CONFIG`, `ApiConfiguration`, `RequestBuilder`) live
+   * directly on the module so each `forRoot[Async]` invocation owns its own
+   * config — two distinct registrations stay isolated under NestJS v11
+   * reference-equality dedup. `HttpModule.registerAsync` receives the async
+   * config providers via `extraProviders`, by reference to the same array
+   * spread into the module's own `providers`, so the consumer `useFactory`
+   * runs exactly once per registration.
    *
    * @param services - IR services to register as providers and exports in the module.
    * @param moduleName - Base module name used to derive the PascalCase class name.
@@ -52,6 +58,9 @@ export class ApiModuleWriter {
       this.importBuilder.createNamedImport('./api.configuration', ['ApiConfiguration']),
     );
     importNodes.push(
+      this.importBuilder.createNamedImport('./request-builder.service', ['RequestBuilder']),
+    );
+    importNodes.push(
       this.importBuilder.createNamedImport('./api.types', [
         'API_CONFIG',
         'ApiModuleAsyncConfig',
@@ -60,12 +69,9 @@ export class ApiModuleWriter {
       ]),
     );
 
-    // Append one import per generated service, using the kebab-cased file name convention.
     for (const service of services) {
       importNodes.push(
-        this.importBuilder.createNamedImport(`./services/${toKebabCase(service.name)}.service`, [
-          service.name,
-        ]),
+        this.importBuilder.createNamedImport(`./services/${service.fileName}`, [service.name]),
       );
     }
 
@@ -98,6 +104,49 @@ export class ApiModuleWriter {
     return this.printer.print(nodesWithHeader, 'api.module.ts');
   }
 
+  private buildAxiosConfigLiteral(): ts.ObjectLiteralExpression {
+    return ts.factory.createObjectLiteralExpression(
+      [
+        ts.factory.createPropertyAssignment(
+          'baseURL',
+          ts.factory.createBinaryExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('config'),
+              'baseUrl',
+            ),
+            ts.SyntaxKind.QuestionQuestionToken,
+            ts.factory.createStringLiteral(''),
+          ),
+        ),
+        ts.factory.createPropertyAssignment(
+          'headers',
+          ts.factory.createBinaryExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('config'),
+              'headers',
+            ),
+            ts.SyntaxKind.QuestionQuestionToken,
+            ts.factory.createObjectLiteralExpression(),
+          ),
+        ),
+        ts.factory.createPropertyAssignment(
+          'paramsSerializer',
+          ts.factory.createObjectLiteralExpression(
+            [ts.factory.createPropertyAssignment('indexes', ts.factory.createNull())],
+            false,
+          ),
+        ),
+        ts.factory.createSpreadAssignment(
+          ts.factory.createPropertyAccessExpression(
+            ts.factory.createIdentifier('config'),
+            'httpOptions',
+          ),
+        ),
+      ],
+      true,
+    );
+  }
+
   private buildForRoot(moduleName: string, serviceNames: string[]): ts.MethodDeclaration {
     const configParam = ts.factory.createParameterDeclaration(
       undefined,
@@ -108,99 +157,47 @@ export class ApiModuleWriter {
       ts.factory.createObjectLiteralExpression(),
     );
 
-    const providerElements: ts.Expression[] = [
-      ts.factory.createIdentifier('ApiConfiguration'),
-      ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
-      ts.factory.createObjectLiteralExpression(
-        [
-          ts.factory.createPropertyAssignment('provide', ts.factory.createIdentifier('API_CONFIG')),
-          ts.factory.createPropertyAssignment(
-            'useValue',
-            ts.factory.createBinaryExpression(
-              ts.factory.createIdentifier('config'),
-              ts.SyntaxKind.QuestionQuestionToken,
-              ts.factory.createObjectLiteralExpression(),
-            ),
-          ),
-        ],
-        true,
-      ),
-    ];
+    const importsLiteral = ts.factory.createArrayLiteralExpression(
+      [this.buildHttpModuleRegisterSync()],
+      true,
+    );
 
-    const providersDecl = ts.factory.createVariableStatement(
-      undefined,
-      ts.factory.createVariableDeclarationList(
-        [
-          ts.factory.createVariableDeclaration(
-            'providers',
-            undefined,
-            this.typeBuilder.createArray(this.typeBuilder.createReference('Provider')),
-            ts.factory.createArrayLiteralExpression(providerElements, true),
-          ),
-        ],
-        ts.NodeFlags.Const,
-      ),
+    const apiConfigProvider = ts.factory.createObjectLiteralExpression(
+      [
+        ts.factory.createPropertyAssignment('provide', ts.factory.createIdentifier('API_CONFIG')),
+        ts.factory.createPropertyAssignment('useValue', ts.factory.createIdentifier('config')),
+      ],
+      true,
+    );
+
+    const providersLiteral = ts.factory.createArrayLiteralExpression(
+      [
+        ts.factory.createIdentifier('ApiConfiguration'),
+        ts.factory.createIdentifier('RequestBuilder'),
+        apiConfigProvider,
+        ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
+      ],
+      true,
+    );
+
+    const exportsLiteral = ts.factory.createArrayLiteralExpression(
+      [
+        ts.factory.createIdentifier('API_CONFIG'),
+        ts.factory.createIdentifier('ApiConfiguration'),
+        ts.factory.createIdentifier('RequestBuilder'),
+        ts.factory.createIdentifier('HttpModule'),
+        ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
+      ],
+      true,
     );
 
     const returnStatement = ts.factory.createReturnStatement(
       ts.factory.createObjectLiteralExpression(
         [
           ts.factory.createPropertyAssignment('module', ts.factory.createIdentifier(moduleName)),
-          ts.factory.createPropertyAssignment(
-            'imports',
-            ts.factory.createArrayLiteralExpression(
-              [
-                ts.factory.createCallExpression(
-                  ts.factory.createPropertyAccessExpression(
-                    ts.factory.createIdentifier('HttpModule'),
-                    'register',
-                  ),
-                  undefined,
-                  [
-                    ts.factory.createObjectLiteralExpression(
-                      [
-                        ts.factory.createPropertyAssignment(
-                          'baseURL',
-                          ts.factory.createBinaryExpression(
-                            ts.factory.createPropertyAccessExpression(
-                              ts.factory.createIdentifier('config'),
-                              'baseUrl',
-                            ),
-                            ts.SyntaxKind.QuestionQuestionToken,
-                            ts.factory.createStringLiteral(''),
-                          ),
-                        ),
-                        ts.factory.createPropertyAssignment(
-                          'headers',
-                          ts.factory.createBinaryExpression(
-                            ts.factory.createPropertyAccessExpression(
-                              ts.factory.createIdentifier('config'),
-                              'headers',
-                            ),
-                            ts.SyntaxKind.QuestionQuestionToken,
-                            ts.factory.createObjectLiteralExpression(),
-                          ),
-                        ),
-                      ],
-                      true,
-                    ),
-                  ],
-                ),
-              ],
-              true,
-            ),
-          ),
-          ts.factory.createShorthandPropertyAssignment('providers'),
-          ts.factory.createPropertyAssignment(
-            'exports',
-            ts.factory.createArrayLiteralExpression(
-              [
-                ts.factory.createIdentifier('ApiConfiguration'),
-                ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
-              ],
-              true,
-            ),
-          ),
+          ts.factory.createPropertyAssignment('imports', importsLiteral),
+          ts.factory.createPropertyAssignment('providers', providersLiteral),
+          ts.factory.createPropertyAssignment('exports', exportsLiteral),
         ],
         true,
       ),
@@ -214,7 +211,7 @@ export class ApiModuleWriter {
       undefined,
       [configParam],
       this.typeBuilder.createReference('DynamicModule'),
-      ts.factory.createBlock([providersDecl, returnStatement], true),
+      ts.factory.createBlock([returnStatement], true),
     );
   }
 
@@ -260,114 +257,42 @@ export class ApiModuleWriter {
       ),
     );
 
+    const importsLiteral = ts.factory.createArrayLiteralExpression(
+      [
+        ts.factory.createSpreadElement(ts.factory.createIdentifier('imports')),
+        this.buildHttpModuleRegisterAsync(),
+      ],
+      true,
+    );
+
+    const providersLiteral = ts.factory.createArrayLiteralExpression(
+      [
+        ts.factory.createIdentifier('ApiConfiguration'),
+        ts.factory.createIdentifier('RequestBuilder'),
+        ts.factory.createSpreadElement(ts.factory.createIdentifier('asyncProviders')),
+        ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
+      ],
+      true,
+    );
+
+    const exportsLiteral = ts.factory.createArrayLiteralExpression(
+      [
+        ts.factory.createIdentifier('API_CONFIG'),
+        ts.factory.createIdentifier('ApiConfiguration'),
+        ts.factory.createIdentifier('RequestBuilder'),
+        ts.factory.createIdentifier('HttpModule'),
+        ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
+      ],
+      true,
+    );
+
     const returnStatement = ts.factory.createReturnStatement(
       ts.factory.createObjectLiteralExpression(
         [
           ts.factory.createPropertyAssignment('module', ts.factory.createIdentifier(moduleName)),
-          ts.factory.createPropertyAssignment(
-            'imports',
-            ts.factory.createArrayLiteralExpression(
-              [
-                ts.factory.createSpreadElement(ts.factory.createIdentifier('imports')),
-                ts.factory.createCallExpression(
-                  ts.factory.createPropertyAccessExpression(
-                    ts.factory.createIdentifier('HttpModule'),
-                    'registerAsync',
-                  ),
-                  undefined,
-                  [
-                    ts.factory.createObjectLiteralExpression(
-                      [
-                        ts.factory.createShorthandPropertyAssignment('imports'),
-                        ts.factory.createPropertyAssignment(
-                          'inject',
-                          ts.factory.createArrayLiteralExpression([
-                            ts.factory.createIdentifier('API_CONFIG'),
-                          ]),
-                        ),
-                        ts.factory.createPropertyAssignment(
-                          'extraProviders',
-                          ts.factory.createIdentifier('asyncProviders'),
-                        ),
-                        ts.factory.createPropertyAssignment(
-                          'useFactory',
-                          ts.factory.createArrowFunction(
-                            [ts.factory.createModifier(ts.SyntaxKind.AsyncKeyword)],
-                            undefined,
-                            [
-                              ts.factory.createParameterDeclaration(
-                                undefined,
-                                undefined,
-                                'config',
-                                undefined,
-                                this.typeBuilder.createReference('ApiModuleConfig'),
-                              ),
-                            ],
-                            undefined,
-                            ts.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-                            ts.factory.createParenthesizedExpression(
-                              ts.factory.createObjectLiteralExpression(
-                                [
-                                  ts.factory.createPropertyAssignment(
-                                    'baseURL',
-                                    ts.factory.createBinaryExpression(
-                                      ts.factory.createPropertyAccessChain(
-                                        ts.factory.createIdentifier('config'),
-                                        ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
-                                        ts.factory.createIdentifier('baseUrl'),
-                                      ),
-                                      ts.SyntaxKind.QuestionQuestionToken,
-                                      ts.factory.createStringLiteral(''),
-                                    ),
-                                  ),
-                                  ts.factory.createPropertyAssignment(
-                                    'headers',
-                                    ts.factory.createBinaryExpression(
-                                      ts.factory.createPropertyAccessChain(
-                                        ts.factory.createIdentifier('config'),
-                                        ts.factory.createToken(ts.SyntaxKind.QuestionDotToken),
-                                        ts.factory.createIdentifier('headers'),
-                                      ),
-                                      ts.SyntaxKind.QuestionQuestionToken,
-                                      ts.factory.createObjectLiteralExpression(),
-                                    ),
-                                  ),
-                                ],
-                                true,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                      true,
-                    ),
-                  ],
-                ),
-              ],
-              true,
-            ),
-          ),
-          ts.factory.createPropertyAssignment(
-            'providers',
-            ts.factory.createArrayLiteralExpression(
-              [
-                ts.factory.createIdentifier('ApiConfiguration'),
-                ts.factory.createSpreadElement(ts.factory.createIdentifier('asyncProviders')),
-                ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
-              ],
-              true,
-            ),
-          ),
-          ts.factory.createPropertyAssignment(
-            'exports',
-            ts.factory.createArrayLiteralExpression(
-              [
-                ts.factory.createIdentifier('ApiConfiguration'),
-                ...serviceNames.map((name) => ts.factory.createIdentifier(name)),
-              ],
-              true,
-            ),
-          ),
+          ts.factory.createPropertyAssignment('imports', importsLiteral),
+          ts.factory.createPropertyAssignment('providers', providersLiteral),
+          ts.factory.createPropertyAssignment('exports', exportsLiteral),
         ],
         true,
       ),
@@ -393,6 +318,79 @@ export class ApiModuleWriter {
     );
   }
 
+  private buildHttpModuleRegisterSync(): ts.CallExpression {
+    return ts.factory.createCallExpression(
+      ts.factory.createPropertyAccessExpression(
+        ts.factory.createIdentifier('HttpModule'),
+        'register',
+      ),
+      undefined,
+      [this.buildAxiosConfigLiteral()],
+    );
+  }
+
+  /**
+   * `HttpModule.registerAsync({...})` consumed by `forRootAsync`. The async
+   * `API_CONFIG` provider is propagated into HttpModule's scope via
+   * `extraProviders` — same reference as the array spread into the module's
+   * own `providers`, so NestJS instantiates it once and the consumer
+   * `useFactory` runs exactly once per registration.
+   */
+  private buildHttpModuleRegisterAsync(): ts.CallExpression {
+    return ts.factory.createCallExpression(
+      ts.factory.createPropertyAccessExpression(
+        ts.factory.createIdentifier('HttpModule'),
+        'registerAsync',
+      ),
+      undefined,
+      [
+        ts.factory.createObjectLiteralExpression(
+          [
+            ts.factory.createShorthandPropertyAssignment('imports'),
+            ts.factory.createPropertyAssignment(
+              'inject',
+              ts.factory.createArrayLiteralExpression(
+                [ts.factory.createIdentifier('API_CONFIG')],
+                false,
+              ),
+            ),
+            ts.factory.createPropertyAssignment(
+              'extraProviders',
+              ts.factory.createIdentifier('asyncProviders'),
+            ),
+            ts.factory.createPropertyAssignment(
+              'useFactory',
+              ts.factory.createArrowFunction(
+                [ts.factory.createModifier(ts.SyntaxKind.AsyncKeyword)],
+                undefined,
+                [
+                  ts.factory.createParameterDeclaration(
+                    undefined,
+                    undefined,
+                    'config',
+                    undefined,
+                    this.typeBuilder.createReference('ApiModuleConfig'),
+                  ),
+                ],
+                undefined,
+                ts.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+                ts.factory.createParenthesizedExpression(this.buildAxiosConfigLiteral()),
+              ),
+            ),
+          ],
+          true,
+        ),
+      ],
+    );
+  }
+
+  /**
+   * Builds the `createAsyncProviders` helper function — translates an
+   * `ApiModuleAsyncConfig` (`useFactory` / `useClass` / `useExisting`) into a
+   * concrete `Provider[]`. Lives alongside the module so the resulting array
+   * can be shared by reference between `ApiModule.providers` and
+   * `HttpModule.registerAsync({ extraProviders })`.
+   */
   private buildCreateAsyncProvidersFunction(): ts.FunctionDeclaration {
     const ifUseFactory = ts.factory.createIfStatement(
       ts.factory.createPropertyAccessExpression(

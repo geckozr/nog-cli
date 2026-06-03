@@ -5,5 +5,4 @@ export * from './writers/index.writer';
 export * from './writers/api-module.writer';
 export * from './writers/api-configuration.writer';
 export * from './writers/api-types.writer';
-export * from './writers/api-utils.writer';
 export * from './helpers/type.helper';

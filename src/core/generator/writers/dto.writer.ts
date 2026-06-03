@@ -38,6 +38,7 @@ export class DtoWriter {
   public async write(
     model: IrModel,
     allModels: IrModel[],
+    inheritedProperties: Set<string>,
     cliVersion: string,
     specTitle: string,
     specVersion: string,
@@ -58,6 +59,7 @@ export class DtoWriter {
     } else {
       mainNode = this.buildClassNode(
         model,
+        inheritedProperties,
         customTypeImports,
         classValidatorImports,
         classTransformerImports,
@@ -151,6 +153,7 @@ export class DtoWriter {
    */
   private buildClassNode(
     model: IrModel,
+    inheritedProperties: Set<string>,
     customTypeImports: Set<string>,
     classValidatorImports: Set<string>,
     classTransformerImports: Set<string>,
@@ -182,6 +185,7 @@ export class DtoWriter {
       return this.propertyBuilder.create(prop.name, typeNode, {
         isOptional: prop.isOptional,
         isReadonly: prop.isReadonly,
+        isRedeclared: inheritedProperties.has(prop.name),
         description: prop.description,
         decorators: decorators,
       });

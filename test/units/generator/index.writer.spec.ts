@@ -70,14 +70,7 @@ describe('IndexWriter', () => {
     });
 
     it('should generate a root barrel re-exporting subfolders and top-level files as-is', async () => {
-      const fileNames = [
-        'dto',
-        'services',
-        'api.module',
-        'api.configuration',
-        'api.types',
-        'api.utils',
-      ];
+      const fileNames = ['dto', 'services', 'api.module', 'api.configuration', 'api.types'];
 
       const index = await indexWriter.generate(fileNames, '0.10.6', 'Spec', '1.0.0');
 
@@ -86,7 +79,6 @@ describe('IndexWriter', () => {
       expect(index.generatedCode).toContain("export * from './api.module';");
       expect(index.generatedCode).toContain("export * from './api.configuration';");
       expect(index.generatedCode).toContain("export * from './api.types';");
-      expect(index.generatedCode).toContain("export * from './api.utils';");
     });
   });
 });

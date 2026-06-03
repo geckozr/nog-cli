@@ -11,7 +11,7 @@
  *    syntactic correctness and structural shape
  *
  * Assertions cover:
- *  - successful end-to-end generation on real fixtures (Cyclos, Complex)
+ *  - successful end-to-end generation on real fixtures (real-world, complex)
  *  - structural sanity of the produced SDK (NestJS module, services with methods)
  *  - Commander error paths (missing argument, unknown option)
  */
@@ -26,9 +26,9 @@ const TEMP_DIR = path.resolve('test-output');
 
 const TEST_CASES = [
   {
-    name: 'Cyclos (Real World)',
+    name: 'Real World',
     input: 'test/fixtures/cyclos.json',
-    output: 'test-output/e2e-cyclos',
+    output: 'test-output/e2e-real-world',
   },
   {
     name: 'Complex (Edge Cases)',
@@ -139,17 +139,135 @@ describe('nog-cli generator E2E', () => {
 
       const files = collectTypeScriptFiles(outputDir);
 
-      const moduleFile = files.find((file) => file.filename.toLowerCase().endsWith('.module.ts'));
+      const moduleFile = files.find((file) => file.filename === 'api.module.ts');
       expect(moduleFile).toBeDefined();
       expect(hasClassWithDecorator(moduleFile!.sourceFile, 'Module')).toBe(true);
 
-      const serviceFiles = files.filter((file) =>
-        file.filename.toLowerCase().endsWith('.service.ts'),
+      // Config providers are declared directly on the module — no sub-module dance.
+      expect(moduleFile!.sourceFile.text).toMatch(
+        /exports:\s*\[\s*API_CONFIG,\s*ApiConfiguration,\s*RequestBuilder,\s*HttpModule,/,
+      );
+      expect(moduleFile!.sourceFile.text).toMatch(/paramsSerializer:\s*\{\s*indexes:\s*null\s*\}/);
+      expect(moduleFile!.sourceFile.text).toMatch(
+        /static forRootAsync\(options: ApiModuleAsyncConfig\): DynamicModule/,
+      );
+      expect(moduleFile!.sourceFile.text).toContain('HttpModule.register({');
+      expect(moduleFile!.sourceFile.text).toContain('HttpModule.registerAsync({');
+
+      // forRootAsync builds asyncProviders once and shares the same reference between
+      // module.providers and HttpModule.registerAsync({ extraProviders }).
+      expect(moduleFile!.sourceFile.text).toMatch(
+        /const asyncProviders\s*=\s*createAsyncProviders\(options\)/,
+      );
+      expect(moduleFile!.sourceFile.text).toMatch(/extraProviders:\s*asyncProviders/);
+      expect(moduleFile!.sourceFile.text).toMatch(
+        /providers:\s*\[\s*ApiConfiguration,\s*RequestBuilder,\s*\.\.\.asyncProviders/,
+      );
+
+      // The helper function lives alongside the class.
+      expect(moduleFile!.sourceFile.text).toContain(
+        'function createAsyncProviders(options: ApiModuleAsyncConfig): Provider[]',
+      );
+
+      // Direct imports of the configuration providers — declared inline on the module.
+      expect(moduleFile!.sourceFile.text).toContain(
+        "import { ApiConfiguration } from './api.configuration';",
+      );
+      expect(moduleFile!.sourceFile.text).toContain(
+        "import { RequestBuilder } from './request-builder.service';",
+      );
+
+      const typesFile = files.find((file) => file.filename === 'api.types.ts');
+      expect(typesFile).toBeDefined();
+      expect(typesFile!.sourceFile.text).toMatch(
+        /export interface ApiModuleAsyncConfig\s+extends Pick<ModuleMetadata, 'imports'>/,
+      );
+      expect(typesFile!.sourceFile.text).toMatch(
+        /useFactory\?:\s*\(\s*\.\.\.args:\s*any\[\]\s*\)\s*=>/,
+      );
+      expect(typesFile!.sourceFile.text).toMatch(/inject\?:\s*any\[\];/);
+
+      const serviceFiles = files.filter(
+        (file) =>
+          file.filename.toLowerCase().endsWith('.service.ts') &&
+          file.filename !== 'request-builder.service.ts',
       );
       expect(serviceFiles.length).toBeGreaterThan(0);
 
       const hasServiceMethods = serviceFiles.some((file) => hasMethodDeclaration(file.sourceFile));
       expect(hasServiceMethods).toBe(true);
+
+      const configFile = files.find((file) => file.filename === 'api.configuration.ts');
+      expect(configFile).toBeDefined();
+      expect(configFile!.sourceFile.text).toMatch(/get baseUrl\(\): string \{/);
+      expect(configFile!.sourceFile.text).toMatch(/get headers\(\): ApiHeaders \{/);
+      expect(configFile!.sourceFile.text).toMatch(/get httpOptions\(\): AxiosRequestConfig \{/);
+
+      const requestBuilderFile = files.find(
+        (file) => file.filename === 'request-builder.service.ts',
+      );
+      expect(requestBuilderFile).toBeDefined();
+      expect(hasClassWithDecorator(requestBuilderFile!.sourceFile, 'Injectable')).toBe(true);
+      expect(requestBuilderFile!.sourceFile.text).toContain('export class RequestBuilder {');
+      expect(requestBuilderFile!.sourceFile.text).toContain('public buildUrl(');
+      expect(requestBuilderFile!.sourceFile.text).toContain('public buildQuery<');
+      expect(requestBuilderFile!.sourceFile.text).toContain('public buildHeaders<');
+      expect(requestBuilderFile!.sourceFile.text).toContain(
+        "export type ParamStyle = 'csv' | 'space' | 'pipe' | 'deep';",
+      );
+
+      for (const serviceFile of serviceFiles) {
+        expect(serviceFile.sourceFile.text).toContain('private readonly rb: RequestBuilder');
+        expect(serviceFile.sourceFile.text).toContain('this.rb.buildUrl(');
+      }
+      const someServiceCallsBuildQuery = serviceFiles.some((file) =>
+        file.sourceFile.text.includes('this.rb.buildQuery('),
+      );
+      expect(someServiceCallsBuildQuery).toBe(true);
+
+      const multipartService = serviceFiles.find((file) =>
+        file.sourceFile.text.includes("headers['Content-Type'] = 'multipart/form-data'"),
+      );
+      expect(multipartService).toBeDefined();
+
+      const phoneViewFile = files.find((file) => file.filename === 'phone-view.dto.ts');
+      if (phoneViewFile) {
+        for (const prop of ['name', 'number', 'extension', 'hidden', 'enabledForSms', 'verified']) {
+          expect(phoneViewFile.sourceFile.text).toMatch(new RegExp(`declare public ${prop}\\??:`));
+        }
+        expect(phoneViewFile.sourceFile.text).toMatch(/\n {2}public user\??:/);
+        expect(phoneViewFile.sourceFile.text).toMatch(/\n {2}public canEdit\??:/);
+      }
+
+      const phoneFile = files.find((file) => file.filename === 'phone.dto.ts');
+      if (phoneFile) {
+        expect(phoneFile.sourceFile.text).toMatch(/declare public name\??:/);
+      }
+    });
+  });
+
+  describe('Type safety on anonymous schemas (Finding 4 regression guards)', () => {
+    const cataasOutput = 'test-output/e2e-cataas';
+
+    beforeAll(async () => {
+      fs.rmSync(path.resolve(cataasOutput), { recursive: true, force: true });
+      await runCli(['generate', path.resolve('test/fixtures/cataas.json'), '-o', cataasOutput]);
+    });
+
+    it('emits string-literal unions for inline string enums (no `any | any` fallback)', () => {
+      const catsServicePath = path.join(cataasOutput, 'services', 'cats.service.ts');
+      const text = fs.readFileSync(catsServicePath, 'utf-8');
+
+      expect(text).toContain("'square' | 'medium' | 'small' | 'xsmall'");
+      expect(text).toContain("'mono' | 'negate' | 'custom'");
+      expect(text).toContain("'cover' | 'contain' | 'fill' | 'inside' | 'outside'");
+    });
+
+    it('emits inline TS type literal for anonymous object responses (no `any` fallback)', () => {
+      const apiServicePath = path.join(cataasOutput, 'services', 'api.service.ts');
+      const text = fs.readFileSync(apiServicePath, 'utf-8');
+
+      expect(text).toContain('Observable<AxiosResponse<{ count?: number }>>');
     });
   });
 

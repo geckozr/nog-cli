@@ -6,6 +6,7 @@ export interface PropertyBuilderOptions {
   decorators?: ts.Decorator[];
   isOptional?: boolean;
   isReadonly?: boolean;
+  isRedeclared?: boolean;
   description?: string;
 }
 
@@ -37,6 +38,10 @@ export class PropertyBuilder {
 
     if (options.decorators && options.decorators.length > 0) {
       modifiers.push(...options.decorators);
+    }
+
+    if (options.isRedeclared) {
+      modifiers.push(ts.factory.createModifier(ts.SyntaxKind.DeclareKeyword));
     }
 
     modifiers.push(ts.factory.createModifier(ts.SyntaxKind.PublicKeyword));

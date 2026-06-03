@@ -73,6 +73,7 @@ describe('OpenApiConverter', () => {
         it('should correctly convert PetService with GET operations', () => {
           const petService = converted.services.find((service) => service.name === 'PetService');
           expect(petService).toBeDefined();
+          expect(petService?.fileName).toBe('pet.service');
           expect(petService?.operations.size).toBeGreaterThan(0);
 
           const getPetByIdOp = Array.from(petService?.operations.values() || []).find(
@@ -197,7 +198,7 @@ describe('OpenApiConverter', () => {
     });
   });
 
-  describe('Cyclos 4.15 OpenAPI conversion', () => {
+  describe('Real-world OpenAPI conversion', () => {
     describe('convert', () => {
       const openapiDoc: OpenApiDocument = JSON.parse(
         readFileSync(path.join(__dirname, '../../fixtures/cyclos.json'), 'utf-8'),
@@ -284,7 +285,7 @@ describe('OpenApiConverter', () => {
             (service) => service.name === 'DefaultService',
           );
           // DefaultService should be created if there are operations without tags
-          // This depends on the Cyclos API structure
+          // This depends on the real-world fixture's tagging
           if (defaultService) {
             expect(defaultService?.operations.size).toBeGreaterThanOrEqual(0);
           }

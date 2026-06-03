@@ -7,11 +7,19 @@ import { IrType } from './common';
 export interface IrService {
   /**
    * The service class name in PascalCase.
-   * Used to generate the TypeScript class and filename.
-   * @example 'DefaultService' (generates default-service.service.ts)
-   * @example 'UsersService' (generates users-service.service.ts)
+   * @example 'DefaultService'
+   * @example 'UsersService'
    */
   name: string;
+
+  /**
+   * The generated file basename (without `.ts` extension). Always ends with `.service`.
+   * Computed once in the IR converter so writers and the barrel index reference a
+   * single source of truth and never re-derive it.
+   * @example 'default.service' (writer emits `default.service.ts`)
+   * @example 'account-visibility.service' (writer emits `account-visibility.service.ts`)
+   */
+  fileName: string;
 
   /**
    * Map of operation IDs to their IR representations.
@@ -147,4 +155,31 @@ export interface IrParameter {
    * Used to generate JSDoc comments for individual parameters in the params object.
    */
   description?: string;
+
+  /**
+   * Serialization style for the parameter, as defined by OpenAPI 3.0 Parameter Object.
+   * Only stored when it differs from the spec default for the parameter location.
+   * Defaults: `form` for `in: 'query'`, `simple` for `in: 'path' | 'header'`.
+   */
+  style?:
+    | 'form'
+    | 'spaceDelimited'
+    | 'pipeDelimited'
+    | 'deepObject'
+    | 'simple'
+    | 'label'
+    | 'matrix';
+
+  /**
+   * Whether array/object values are expanded into separate parameters.
+   * Only stored when it differs from the style default.
+   * Spec defaults: `true` when `style: 'form'`, `false` otherwise.
+   */
+  explode?: boolean;
+
+  /**
+   * When true, RFC 3986 reserved characters in the value pass without percent-encoding.
+   * Applies only to query parameters; defaults to `false`. Runtime support deferred — IR-only for now.
+   */
+  allowReserved?: boolean;
 }
