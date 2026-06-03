@@ -306,6 +306,48 @@ describe('ServiceWriter', () => {
     expect(output.generatedCode).toContain('SecureResourceDto | ErrorDto');
   });
 
+  it('emits an intersection return type when the operation returnType has composition: intersection', async () => {
+    const mockService: IrService = {
+      name: 'AuditService',
+      fileName: 'audit.service',
+      operations: new Map([
+        [
+          'getPostAuditTrail',
+          {
+            methodName: 'getPostAuditTrail',
+            operationId: 'getPostAuditTrail',
+            path: '/posts/{id}/audit-trail',
+            method: 'GET',
+            acceptHeader: 'application/json',
+            parameters: [
+              {
+                name: 'id',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
+                isRequired: true,
+              },
+            ],
+            returnType: {
+              rawType: ['Post', 'AuditInfo'],
+              isPrimitive: false,
+              isArray: false,
+              composition: 'intersection' as const,
+            },
+          },
+        ],
+      ]),
+    };
+
+    const allModels = makeModels({ name: 'Post' }, { name: 'AuditInfo' });
+    const output = await writer.write(mockService, allModels, '1.0.0', 'Audit API', '1.0.0');
+
+    expect(output.generatedCode).toContain('export class AuditService {');
+    expect(output.generatedCode).toContain("import { Post } from '../dto/post.dto';");
+    expect(output.generatedCode).toContain("import { AuditInfo } from '../dto/audit-info.dto';");
+    expect(output.generatedCode).toContain('Observable<AxiosResponse<Post & AuditInfo>>');
+    expect(output.generatedCode).toContain('Promise<Post & AuditInfo>');
+  });
+
   it('keeps query and header params strictly in their own sub-branches (sentinel against routing regression)', async () => {
     const mockService: IrService = {
       name: 'VoucherInfoService',

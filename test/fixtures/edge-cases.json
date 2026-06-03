@@ -450,6 +450,27 @@
           }
         },
         "required": ["id", "name"]
+      },
+      "DocumentWithOverride": {
+        "description": "allOf with an inline object that declares 'summary' + sibling 'properties' that re-declares 'summary'. The IR converter's allOf phase pushes 'summary' first; the direct-properties phase then finds the collision and overrides it.",
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "Inline allOf-supplied summary (overridden below)."
+              }
+            }
+          }
+        ],
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Direct-properties summary (wins over the allOf one)."
+          }
+        }
       }
     }
   }
