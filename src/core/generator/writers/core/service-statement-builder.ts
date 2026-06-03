@@ -166,18 +166,19 @@ export class ServiceStatementBuilder {
       keysArray,
     ];
 
-    const stylesEntries = meta
-      ? paramNames
-          .map((name) => {
-            const shortName = this.toShortStyle(meta[name]);
-            if (!shortName) return null;
-            return ts.factory.createPropertyAssignment(
-              ts.factory.createStringLiteral(name),
-              ts.factory.createStringLiteral(shortName),
-            );
-          })
-          .filter((entry): entry is ts.PropertyAssignment => entry !== null)
-      : [];
+    const stylesEntries: ts.PropertyAssignment[] = [];
+    if (meta) {
+      for (const name of paramNames) {
+        const shortName = this.toShortStyle(meta[name]);
+        if (!shortName) continue;
+        stylesEntries.push(
+          ts.factory.createPropertyAssignment(
+            ts.factory.createStringLiteral(name),
+            ts.factory.createStringLiteral(shortName),
+          ),
+        );
+      }
+    }
 
     if (stylesEntries.length > 0) {
       args.push(ts.factory.createObjectLiteralExpression(stylesEntries, false));
