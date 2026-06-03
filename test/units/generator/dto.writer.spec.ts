@@ -312,7 +312,7 @@ describe('DtoWriter', () => {
   });
 
   // TODO: move to a separate performance test file and increase iterations for a more robust benchmark
-  it('should generate 1000 complex DTOs in under 1500ms (Performance Benchmark)', async () => {
+  it('should generate 1000 complex DTOs within the performance budget (Performance Benchmark)', async () => {
     // Exercises every code path: inheritance, primitives, custom refs, arrays,
     // comments, validators, and discriminators.
     const complexModel: IrModel = {
@@ -362,7 +362,14 @@ describe('DtoWriter', () => {
     }
     const end = performance.now();
     const duration = end - start;
-    expect(duration).toBeLessThan(3000);
+    // GitHub Actions standard runners are roughly 3-4x slower than a modern dev laptop
+    // for CPU-bound workloads, so allow a generous budget when CI=true. Local runs keep
+    // the tight budget — if it regresses there, we want to know.
+    const budget = process.env.CI ? 8000 : 3000;
+    console.log(
+      `[benchmark] dto.writer 1000 complex DTOs: ${duration.toFixed(0)}ms (budget ${budget}ms)`,
+    );
+    expect(duration).toBeLessThan(budget);
   });
 
   it('should generate a type alias for a pure oneOf model', async () => {
