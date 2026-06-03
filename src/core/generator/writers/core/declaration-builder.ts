@@ -6,19 +6,12 @@ import ts from 'typescript';
  */
 export class DeclarationBuilder {
   /**
-   * Creates an exported or internal Type Alias.
+   * Creates an exported Type Alias.
    * @example export type ApiHeaders = Record<string, string>;
    */
-  public createTypeAlias(
-    name: string,
-    type: ts.TypeNode,
-    isExported = true,
-  ): ts.TypeAliasDeclaration {
-    const modifiers = isExported
-      ? [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)]
-      : undefined;
+  public createTypeAlias(name: string, type: ts.TypeNode): ts.TypeAliasDeclaration {
     return ts.factory.createTypeAliasDeclaration(
-      modifiers,
+      [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
       ts.factory.createIdentifier(name),
       undefined,
       type,
@@ -26,29 +19,23 @@ export class DeclarationBuilder {
   }
 
   /**
-   * Creates an exported or internal Interface.
+   * Creates an exported Interface.
    * @param name The name of the interface.
    * @param members The properties and methods of the interface.
    * @param extendsTypes Optional array of expressions for the 'extends' clause.
-   * @param isExported Whether to add the 'export' modifier.
    */
   public createInterface(
     name: string,
     members: ts.TypeElement[],
     extendsTypes?: ts.ExpressionWithTypeArguments[],
-    isExported = true,
   ): ts.InterfaceDeclaration {
-    const modifiers = isExported
-      ? [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)]
-      : undefined;
-
     const heritageClauses =
       extendsTypes && extendsTypes.length > 0
         ? [ts.factory.createHeritageClause(ts.SyntaxKind.ExtendsKeyword, extendsTypes)]
         : undefined;
 
     return ts.factory.createInterfaceDeclaration(
-      modifiers,
+      [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
       ts.factory.createIdentifier(name),
       undefined,
       heritageClauses,
@@ -57,21 +44,14 @@ export class DeclarationBuilder {
   }
 
   /**
-   * Creates a Property Signature for an interface.
+   * Creates an optional Property Signature for an interface.
    * @example baseUrl?: string;
    */
-  public createPropertySignature(
-    name: string,
-    type: ts.TypeNode,
-    isOptional = false,
-  ): ts.PropertySignature {
-    const questionToken = isOptional
-      ? ts.factory.createToken(ts.SyntaxKind.QuestionToken)
-      : undefined;
+  public createPropertySignature(name: string, type: ts.TypeNode): ts.PropertySignature {
     return ts.factory.createPropertySignature(
       undefined,
       ts.factory.createIdentifier(name),
-      questionToken,
+      ts.factory.createToken(ts.SyntaxKind.QuestionToken),
       type,
     );
   }
@@ -99,14 +79,7 @@ export class DeclarationBuilder {
    * Creates an exported constant variable statement.
    * @example export const API_CONFIG = Symbol("API_CONFIG");
    */
-  public createConstVariable(
-    name: string,
-    initializer: ts.Expression,
-    isExported = true,
-  ): ts.VariableStatement {
-    const modifiers = isExported
-      ? [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)]
-      : undefined;
+  public createConstVariable(name: string, initializer: ts.Expression): ts.VariableStatement {
     const declaration = ts.factory.createVariableDeclaration(
       ts.factory.createIdentifier(name),
       undefined,
@@ -117,7 +90,10 @@ export class DeclarationBuilder {
       [declaration],
       ts.NodeFlags.Const,
     );
-    return ts.factory.createVariableStatement(modifiers, declarationList);
+    return ts.factory.createVariableStatement(
+      [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
+      declarationList,
+    );
   }
 
   /**

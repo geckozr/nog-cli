@@ -51,17 +51,14 @@ export class ApiTypesWriter {
       this.declarationBuilder.createPropertySignature(
         'baseUrl',
         this.typeBuilder.createPrimitive('string'),
-        true,
       ),
       this.declarationBuilder.createPropertySignature(
         'headers',
         this.typeBuilder.createReference('ApiHeaders'),
-        true,
       ),
       this.declarationBuilder.createPropertySignature(
         'httpOptions',
         this.typeBuilder.createReference('AxiosRequestConfig'),
-        true,
       ),
     ]);
 
@@ -91,29 +88,24 @@ export class ApiTypesWriter {
           this.typeBuilder.createReference('Type', [
             this.typeBuilder.createReference('ApiModuleConfigFactory'),
           ]),
-          true,
         ),
         this.declarationBuilder.createPropertySignature(
           'useClass',
           this.typeBuilder.createReference('Type', [
             this.typeBuilder.createReference('ApiModuleConfigFactory'),
           ]),
-          true,
         ),
         this.declarationBuilder.createPropertySignature(
           'useFactory',
           this.buildUseFactoryType(apiModuleConfigUnion),
-          true,
         ),
         this.declarationBuilder.createPropertySignature(
           'inject',
           this.typeBuilder.createArray(this.typeBuilder.createPrimitive('any')),
-          true,
         ),
         this.declarationBuilder.createPropertySignature(
           'extraProviders',
           this.typeBuilder.createArray(this.typeBuilder.createReference('Provider')),
-          true,
         ),
       ],
       [
@@ -122,7 +114,6 @@ export class ApiTypesWriter {
           ts.factory.createLiteralTypeNode(ts.factory.createStringLiteral('imports')),
         ]),
       ],
-      true,
     );
 
     const apiConfigToken = this.declarationBuilder.createConstVariable(

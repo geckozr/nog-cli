@@ -34,7 +34,7 @@ describe('DeclarationBuilder', () => {
     const stringType = typeBuilder.createPrimitive('string');
     const promiseType = typeBuilder.createReference('Promise', [stringType]);
 
-    const prop = builder.createPropertySignature('baseUrl', stringType, true);
+    const prop = builder.createPropertySignature('baseUrl', stringType);
     const method = builder.createMethodSignature('getConfig', [], promiseType);
 
     const node = builder.createInterface('ApiConfig', [prop, method]);
