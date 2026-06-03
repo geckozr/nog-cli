@@ -66,7 +66,7 @@ Generate TypeDoc documentation:
 npm run docs
 ```
 
-Output is written to `docs/`.
+Output is written to `dist-docs/` (gitignored). The static documentation lives in `docs/` (versioned).
 
 ### Test
 
@@ -97,29 +97,6 @@ npm run test:all
 ```
 
 **Coverage Requirement:** Greater than 90% line coverage. Pull requests must maintain or improve coverage.
-
-## How to Add a New Feature
-
-### Scenario A: Support a New Validation Rule (e.g., @Max(100))
-
-1. **Modify IR**: Update `IrValidator` in `src/core/ir/models.ts` to include the new validator type (e.g., `'MAX'`).
-2. **Update Mapper**: In `src/core/ir/analyzer/type.mapper.ts`, extract the `maximum` field from the OpenAPI schema and push a `'MAX'` validator to the list.
-3. **Update Generator**: In `src/core/generator/writers/dto.writer.ts`, read the `'MAX'` validator from the IR and add the `@Max()` decorator to the class property using `ts-morph`.
-4. **Add Tests**: Write unit tests for the mapper and generator, plus an E2E test with a fixture.
-
-### Scenario B: Change How Services Are Generated
-
-1. **Modify Generator**: Edit `src/core/generator/writers/service.writer.ts`.
-2. **Do NOT Touch IR**: Unless you need data that isn't currently extracted from the OpenAPI spec.
-3. **Add Tests**: Update service.writer.spec.ts with new test cases.
-
-### Scenario C: Support a New OpenAPI Feature
-
-1. **Update Parser** (if needed): Modify `src/core/parser/openapi.parser.ts` to extract new data.
-2. **Extend IR**: Add new fields to `IrOperation`, `IrModel`, or `IrService` in `src/core/ir/models.ts`.
-3. **Update Converter**: Modify `src/core/ir/converter.ts` to populate the new IR fields.
-4. **Update Generator**: Modify the appropriate writer to emit code based on the new IR data.
-5. **Add E2E Test**: Create a fixture in `test/fixtures/` and verify generated code compiles.
 
 ### Lint
 
@@ -163,7 +140,7 @@ Address any reported unused or missing dependencies.
 
 ### Code Generation
 
-- **AST over Strings**: Never build code using string templates (e.g., `` `export class ${name}` ``). Always use `ts-morph` methods (e.g., `sourceFile.addClass(...)`).
+- **AST over Strings**: Never build code using string templates (e.g., `` `export class ${name}` ``). Always go through the TypeScript Compiler API (`ts.factory.create*`) and the project's `writers/core/*` builders (`DeclarationBuilder`, `DecoratorBuilder`, `TypeBuilder`, etc.).
 - **Immutability**: The IR should be treated as immutable once passed to the Generator.
 
 ### Naming Conventions
@@ -184,8 +161,8 @@ Address any reported unused or missing dependencies.
 
 - **Unit Tests**: Located in `test/units/`. Test components in isolation with mocked dependencies.
 - **E2E Tests**: Located in `test/e2e/`. Run the full CLI against fixtures and verify the output compiles.
-- **Mock Naming**: Use strict naming (e.g., `projectMock`, `dtoWriterMock` - camelCase).
-- **Syntax Check**: E2E tests must validate generated code syntax using `ts-morph` (not just file existence).
+- **Mock Naming**: Use strict naming (e.g., `dtoWriterMock`, `serviceWriterMock` - camelCase).
+- **Syntax Check**: E2E tests must validate generated code structure using the TypeScript Compiler API (`ts.createSourceFile` + visitor), not just file existence.
 
 ## Code Standards
 
@@ -312,7 +289,7 @@ The codebase must be clean before commit:
 
 ## Architecture Compliance
 
-Read [DOCUMENTATION.md](DOCUMENTATION.md) to understand the three-stage compiler architecture:
+Read [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) to understand the three-stage compiler architecture:
 
 1. **Parser** (`src/core/parser/`): Load and validate OpenAPI.
 2. **IR** (`src/core/ir/`): Normalize to framework-agnostic representation.
@@ -338,18 +315,26 @@ Read [DOCUMENTATION.md](DOCUMENTATION.md) to understand the three-stage compiler
    }
    ```
 
-3. **Update Generator**: Apply decorator in `src/core/generator/writers/dto.writer.ts`:
+3. **Update Generator**: Map the IR validator to a `class-validator` decorator name in `VALIDATOR_DECORATOR_MAP` (`src/core/ir/`):
 
    ```typescript
-   if (validator.type === 'PATTERN') {
-     propDecl.addDecorator({
-       name: 'Matches',
-       arguments: [validator.value],
-     });
+   export const VALIDATOR_DECORATOR_MAP: Record<IrValidatorType, string> = {
+     // ...existing entries
+     PATTERN: 'Matches',
+   };
+   ```
+
+   The DTO writer's `mapValidators` method then produces the AST decorator through `DecoratorBuilder.create(name, args)` and auto-tracks the `class-validator` import. If the validator carries a non-primitive argument (e.g. a regex), extend the `params` handling in `mapValidators` accordingly:
+
+   ```typescript
+   if (val.type === 'PATTERN') {
+     args.push(ts.factory.createRegularExpressionLiteral(`/${val.params}/`));
    }
    ```
 
-4. **Test**: Add unit tests for each layer. Add integration test to `test/e2e/`.
+   Never call `ts.factory.create*` from outside the `writers/core/*` builders for code that the builders already produce. New decorator shapes belong in `DecoratorBuilder`; new property shapes in `PropertyBuilder`.
+
+4. **Test**: Add unit tests for each layer. Add an integration test to `test/e2e/`.
 
 ## Testing
 
@@ -359,11 +344,21 @@ Located in `test/units/`. Test components in isolation using mocks:
 
 ```typescript
 describe('DtoWriter', () => {
-  it('should generate a DTO class with properties', () => {
-    const projectMock = { createSourceFile: vi.fn() };
-    const writer = new DtoWriter(projectMock, '/out');
+  it('should generate a DTO class with properties', async () => {
+    const writer = new DtoWriter(
+      new AstPrinter(),
+      new HeaderGenerator(),
+      new ImportBuilder(),
+      new TypeBuilder(),
+      new DeclarationBuilder(),
+      new DecoratorBuilder(),
+      new PropertyBuilder(new CommentModifier()),
+      new CommentModifier(),
+      new ExpressionBuilder(),
+    );
 
-    // Assert behavior
+    const file = await writer.write(model, [model], '1.0.0', 'Spec', '1.0');
+    expect(file.generatedCode).toContain('export class MyDto');
   });
 });
 ```
@@ -390,8 +385,8 @@ Run the CLI and validate output structure (see `test/e2e/generator.e2e-spec.ts`)
 
 ```bash
 nog-cli generate test/fixtures/petstore.json -o /tmp/output
-# Load output into ts-morph Project
-# Verify classes, methods, imports exist
+# Walk the output, parse each .ts with ts.createSourceFile
+# Verify classes, decorators, methods, imports exist
 ```
 
 ## Git Workflow

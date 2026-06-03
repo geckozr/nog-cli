@@ -1,12 +1,28 @@
-import { IndentationText, ModuleKind, Project, QuoteKind, ScriptTarget } from 'ts-morph';
+import { mkdirSync, writeFileSync } from 'fs';
+import path from 'path';
 
+import packageJson from '../../../package.json';
 import { Logger } from '../../utils/logger';
 import { IrDefinition } from '../ir/interfaces';
+import { ApiConfigurationWriter } from './writers/api-configuration.writer';
+import { ApiModuleWriter } from './writers/api-module.writer';
+import { ApiTypesWriter } from './writers/api-types.writer';
+import { AstPrinter } from './writers/core/ast-printer';
+import { CommentModifier } from './writers/core/comment-modifier';
+import { DeclarationBuilder } from './writers/core/declaration-builder';
+import { DecoratorBuilder } from './writers/core/decorator-builder';
+import { ExpressionBuilder } from './writers/core/expression-builder';
+import { HeaderGenerator } from './writers/core/header-generator';
+import { ImportBuilder } from './writers/core/import-builder';
+import { ParameterBuilder } from './writers/core/parameter-builder';
+import { PropertyBuilder } from './writers/core/property-builder';
+import { ServiceMethodBuilder } from './writers/core/service-method-builder';
+import { ServiceStatementBuilder } from './writers/core/service-statement-builder';
+import { TypeBuilder } from './writers/core/type-builder';
 import { DtoWriter } from './writers/dto.writer';
 import { IndexWriter } from './writers/index.writer';
-import { ModuleWriter } from './writers/module.writer';
+import { RequestBuilderWriter } from './writers/request-builder.writer';
 import { ServiceWriter } from './writers/service.writer';
-import { UsageWriter } from './writers/usage.writer';
 
 /**
  * Optional configuration for the Generator Engine.
@@ -25,12 +41,20 @@ export interface GeneratorConfig {
 /**
  * Main Code Generation Engine.
  *
- * It orchestrates the entire generation process by initializing the TypeScript project
- * and delegating specific tasks to specialized Writers (DTOs, Services, Modules, etc.).
+ * Orchestrates the entire generation process by delegating specific tasks to
+ * specialized Writers (DTOs, Services, Modules, etc.) that emit code through
+ * the TypeScript Compiler API (`ts.factory`) and format the result with Prettier.
  */
 export class GeneratorEngine {
-  private project: Project;
   private config: GeneratorConfig;
+
+  private dtoWriter: DtoWriter;
+  private serviceWriter: ServiceWriter;
+  private apiTypesWriter: ApiTypesWriter;
+  private apiConfigurationWriter: ApiConfigurationWriter;
+  private requestBuilderWriter: RequestBuilderWriter;
+  private apiModuleWriter: ApiModuleWriter;
+  private indexWriter: IndexWriter;
 
   /**
    * Creates a new instance of the Generator Engine.
@@ -48,22 +72,75 @@ export class GeneratorEngine {
       ...config,
     };
 
-    // Initialize ts-morph Project with explicit compiler settings
-    this.project = new Project({
-      compilerOptions: {
-        target: ScriptTarget.ESNext,
-        module: ModuleKind.CommonJS,
-        declaration: true,
-        strict: true,
-        esModuleInterop: true,
-        skipLibCheck: true,
-      },
-      manipulationSettings: {
-        indentationText: IndentationText.TwoSpaces,
-        quoteKind: QuoteKind.Single,
-        useTrailingCommas: true,
-      },
-    });
+    const printer = new AstPrinter();
+    const headerGen = new HeaderGenerator();
+    const importBuilder = new ImportBuilder();
+    const typeBuilder = new TypeBuilder();
+    const declaratorBuilder = new DeclarationBuilder();
+    const decoratorBuilder = new DecoratorBuilder();
+    const commentModifier = new CommentModifier();
+    const propertyBuilder = new PropertyBuilder(commentModifier);
+    const expressionBuilder = new ExpressionBuilder();
+    const parameterBuilder = new ParameterBuilder(commentModifier);
+    const serviceMethodBuilder = new ServiceMethodBuilder(commentModifier);
+    const serviceStatementBuilder = new ServiceStatementBuilder();
+
+    this.dtoWriter = new DtoWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      declaratorBuilder,
+      decoratorBuilder,
+      propertyBuilder,
+      commentModifier,
+      expressionBuilder,
+    );
+
+    this.serviceWriter = new ServiceWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+      parameterBuilder,
+      serviceMethodBuilder,
+      serviceStatementBuilder,
+    );
+
+    this.apiTypesWriter = new ApiTypesWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      declaratorBuilder,
+    );
+
+    this.apiConfigurationWriter = new ApiConfigurationWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+    );
+
+    this.requestBuilderWriter = new RequestBuilderWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+    );
+
+    this.apiModuleWriter = new ApiModuleWriter(
+      printer,
+      headerGen,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+    );
+
+    this.indexWriter = new IndexWriter(printer, headerGen);
   }
 
   /**
@@ -76,68 +153,147 @@ export class GeneratorEngine {
     Logger.info('Starting code generation...');
 
     try {
+      const cliVersion = packageJson.version;
       const specTitle = ir.info?.title ?? 'Unknown Spec';
       const specVersion = ir.info?.version ?? 'Unknown Version';
 
-      // 1. Generate DTOs
+      // 1. DTOs
       Logger.info(`Generating ${ir.models.length} DTOs...`);
-      const dtoWriter = new DtoWriter(
-        this.project,
-        this.outputDir,
-        ir.models,
-        specTitle,
-        specVersion,
-      );
-      await dtoWriter.writeAll(ir.models);
 
-      // 2. Generate Services
+      const dtoDir = path.join(this.outputDir, 'dto');
+      mkdirSync(dtoDir, { recursive: true });
+
+      const inheritedMap = this.buildInheritedPropertiesMap(ir.models);
+
+      for (const model of ir.models) {
+        const file = await this.dtoWriter.write(
+          model,
+          ir.models,
+          inheritedMap.get(model.name) ?? new Set(),
+          cliVersion,
+          specTitle,
+          specVersion,
+        );
+        writeFileSync(path.join(dtoDir, file.filename), file.generatedCode);
+      }
+
+      // 2. Services
       Logger.info(`Generating ${ir.services.length} Services...`);
-      const serviceWriter = new ServiceWriter(
-        this.project,
-        this.outputDir,
-        ir.models,
-        specTitle,
-        specVersion,
-      );
-      await serviceWriter.writeAll(ir.services);
 
-      // 3. Generate Module
+      const serviceDir = path.join(this.outputDir, 'services');
+      mkdirSync(serviceDir, { recursive: true });
+
+      for (const service of ir.services) {
+        const file = await this.serviceWriter.write(
+          service,
+          ir.models,
+          cliVersion,
+          specTitle,
+          specVersion,
+        );
+        writeFileSync(path.join(serviceDir, file.filename), file.generatedCode);
+      }
+
+      // 3. NestJS module (api.types, api.configuration, api.module)
       Logger.info('Generating NestJS Module...');
-      const moduleWriter = new ModuleWriter(
-        this.project,
-        this.outputDir,
-        this.config.moduleName,
+
+      const apiTypesFile = await this.apiTypesWriter.write(cliVersion, specTitle, specVersion);
+      writeFileSync(path.join(this.outputDir, apiTypesFile.filename), apiTypesFile.generatedCode);
+
+      const apiConfigFile = await this.apiConfigurationWriter.write(
+        cliVersion,
         specTitle,
         specVersion,
       );
-      await moduleWriter.write(ir);
+      writeFileSync(path.join(this.outputDir, apiConfigFile.filename), apiConfigFile.generatedCode);
 
-      // 4. Generate Barrel Exports (index.ts)
+      const requestBuilderFile = await this.requestBuilderWriter.write(
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(
+        path.join(this.outputDir, requestBuilderFile.filename),
+        requestBuilderFile.generatedCode,
+      );
+
+      const moduleBaseName = this.config.moduleName?.replace(/Module$/, '') ?? 'Api';
+      const apiModuleFile = await this.apiModuleWriter.write(
+        ir.services,
+        moduleBaseName,
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(path.join(this.outputDir, apiModuleFile.filename), apiModuleFile.generatedCode);
+
+      // 4. Barrel exports (index.ts)
       Logger.info('Generating barrel exports...');
-      const indexWriter = new IndexWriter(this.project, this.outputDir, specTitle, specVersion);
-      await indexWriter.write(ir);
 
-      // 5. Generate Usage Documentation
-      Logger.info('Generating usage documentation...');
-      const usageWriter = new UsageWriter(this.project, this.outputDir, specTitle, specVersion);
-      await usageWriter.write(ir);
+      const dtoFileNames = ir.models.map(
+        (model) => `${model.fileName}.${model.isEnum ? 'enum' : 'dto'}`,
+      );
+      const dtoIndex = await this.indexWriter.generate(
+        dtoFileNames,
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(path.join(dtoDir, 'index.ts'), dtoIndex.generatedCode);
 
-      // 6. Save to Disk
-      Logger.info('Writing files to disk...');
-      await this.project.save();
+      const serviceFileNames = ir.services.map((service) => service.fileName);
+      const serviceIndex = await this.indexWriter.generate(
+        serviceFileNames,
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(path.join(serviceDir, 'index.ts'), serviceIndex.generatedCode);
 
-      Logger.info(`✅ Code generation completed! Files written to: ${this.outputDir}`);
+      const rootExports = [
+        'dto',
+        'services',
+        'api.module',
+        'api.configuration',
+        'api.types',
+        'request-builder.service',
+      ];
+      const rootIndex = await this.indexWriter.generate(
+        rootExports,
+        cliVersion,
+        specTitle,
+        specVersion,
+      );
+      writeFileSync(path.join(this.outputDir, 'index.ts'), rootIndex.generatedCode);
+
+      Logger.info(`Code generation completed. Files written to: ${this.outputDir}`);
     } catch (error) {
       Logger.error('Code generation failed:', error);
       throw error;
     }
   }
 
-  /**
-   * Returns the underlying ts-morph Project instance.
-   * Useful for testing or advanced manipulation.
-   */
-  getProject(): Project {
-    return this.project;
+  private buildInheritedPropertiesMap(models: IrDefinition['models']): Map<string, Set<string>> {
+    const registry = new Map(models.map((m) => [m.name, m]));
+    const cache = new Map<string, Set<string>>();
+
+    const resolve = (name: string): Set<string> => {
+      const cached = cache.get(name);
+      if (cached) return cached;
+      const model = registry.get(name);
+      const set = new Set<string>();
+      if (model?.extends) {
+        const parent = registry.get(model.extends);
+        if (parent) {
+          for (const p of parent.properties) set.add(p.name);
+          for (const inh of resolve(parent.name)) set.add(inh);
+        }
+      }
+      cache.set(name, set);
+      return set;
+    };
+
+    for (const m of models) resolve(m.name);
+    return cache;
   }
 }

@@ -279,6 +279,198 @@
           }
         }
       }
+    },
+    "/search/items": {
+      "get": {
+        "summary": "Search items with mixed OpenAPI serialization styles",
+        "operationId": "searchItems",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Array CSV-serialized via form + explode:false",
+            "schema": { "type": "array", "items": { "type": "string" } },
+            "style": "form",
+            "explode": false
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Array pipe-delimited",
+            "schema": { "type": "array", "items": { "type": "string" } },
+            "style": "pipeDelimited"
+          },
+          {
+            "name": "coords",
+            "in": "query",
+            "description": "Array space-delimited",
+            "schema": { "type": "array", "items": { "type": "number" } },
+            "style": "spaceDelimited"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "description": "deepObject expansion (?filter[name]=x)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "min": { "type": "number" }
+              }
+            },
+            "style": "deepObject",
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Plain query param (default form/explode:true)",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matched items",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/User" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/posts/{id}": {
+      "get": {
+        "summary": "Get a post with raw audit info (intersection return type)",
+        "description": "Return type is a pure allOf of two refs, so the IR collapses it into an intersection composition the service writer must serialize with '&'.",
+        "operationId": "getAuditedPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post fused with audit info",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuditedPost" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{id}/audit-trail": {
+      "get": {
+        "summary": "Inline allOf-of-two-refs as a service return type",
+        "description": "The response schema is an inline allOf of two named refs. The converter cannot collapse it into a class (no name), so the IR keeps composition='intersection' all the way to the service writer, which must serialize it as 'Post & AuditInfo'.",
+        "operationId": "getPostAuditTrail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Anonymous intersection of Post and AuditInfo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/Post" },
+                    { "$ref": "#/components/schemas/AuditInfo" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/stats": {
+      "get": {
+        "summary": "Get post stats keyed by post id (Record<string, $ref> property)",
+        "operationId": "getPostStats",
+        "responses": {
+          "200": {
+            "description": "Map-shaped property whose value is a DTO ref",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PostStats" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{id}/with-override": {
+      "get": {
+        "summary": "Get a document whose schema overrides an allOf-supplied property",
+        "operationId": "getDocumentWithOverride",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document whose 'summary' field is supplied by allOf and then re-declared by sibling properties",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DocumentWithOverride" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/paths/{specialId}/details": {
+      "get": {
+        "summary": "Path param that may contain special characters (encoding test)",
+        "operationId": "getPathDetails",
+        "parameters": [
+          {
+            "name": "specialId",
+            "in": "path",
+            "required": true,
+            "description": "May contain slashes, spaces, reserved chars",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Trace-Id",
+            "in": "header",
+            "description": "Custom trace header (must NOT leak into queryParams)",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "description": "Plain query alongside header (separation test)",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Path details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -586,6 +778,45 @@
             "required": ["userId"]
           }
         ]
+      },
+      "AuditedPost": {
+        "description": "Pure allOf of two refs. The IR collapses this into an intersection (refs.length > 1) the service writer must serialize as 'Post & AuditInfo'.",
+        "allOf": [
+          { "$ref": "#/components/schemas/Post" },
+          { "$ref": "#/components/schemas/AuditInfo" }
+        ]
+      },
+      "PostStats": {
+        "type": "object",
+        "description": "Has a map-shaped property whose value type is a DTO ref. Exercises the non-primitive branch of the Record value-type fallback in the DTO writer.",
+        "properties": {
+          "commentsByPost": {
+            "type": "object",
+            "description": "Comments keyed by post id.",
+            "additionalProperties": { "$ref": "#/components/schemas/Comment" }
+          }
+        }
+      },
+      "DocumentWithOverride": {
+        "description": "allOf with an inline object that declares 'summary' + sibling 'properties' that re-declares 'summary'. The IR converter's allOf phase pushes 'summary' first; the direct-properties phase then finds the collision and overrides it (openapi.converter property-override path). Both declarations are 'string' so the emitted DTO is type-safe.",
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "Inline allOf-supplied summary (overridden below)."
+              }
+            }
+          }
+        ],
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Direct-properties summary (wins over the allOf one)."
+          }
+        }
       },
       "Record": {
         "type": "object",

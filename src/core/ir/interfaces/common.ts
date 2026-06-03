@@ -36,6 +36,14 @@ export interface IrType {
    * @example 'intersection' → `BaseEntity & Timestamped`
    */
   composition?: 'intersection' | 'union';
+
+  /**
+   * Types referenced inside an inline object type (e.g., multipart body).
+   * Used by import resolution to know which types need importing even when
+   * rawType is an inline object literal string like `{ params?: ImportedFileNew; file?: Buffer | ReadStream }`.
+   * @example ['ImportedFileNew']
+   */
+  referencedTypes?: string[];
 }
 
 /**

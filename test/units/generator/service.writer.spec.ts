@@ -1,1192 +1,703 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { ImportHelper } from '../../../src/core/generator/helpers/import.helper';
-import { TypeHelper } from '../../../src/core/generator/helpers/type.helper';
+import { AstPrinter } from '../../../src/core/generator/writers/core/ast-printer';
+import { CommentModifier } from '../../../src/core/generator/writers/core/comment-modifier';
+import { DecoratorBuilder } from '../../../src/core/generator/writers/core/decorator-builder';
+import { HeaderGenerator } from '../../../src/core/generator/writers/core/header-generator';
+import { ImportBuilder } from '../../../src/core/generator/writers/core/import-builder';
+import { ParameterBuilder } from '../../../src/core/generator/writers/core/parameter-builder';
+import { ServiceMethodBuilder } from '../../../src/core/generator/writers/core/service-method-builder';
+import { ServiceStatementBuilder } from '../../../src/core/generator/writers/core/service-statement-builder';
+import { TypeBuilder } from '../../../src/core/generator/writers/core/type-builder';
 import { ServiceWriter } from '../../../src/core/generator/writers/service.writer';
-import { IrService } from '../../../src/core/ir/interfaces';
-
-// Mock helpers
-vi.mock('../../../src/core/generator/helpers/import.helper');
-vi.mock('../../../src/core/generator/helpers/file-header.helper', () => ({
-  FileHeaderHelper: {
-    getHeader: () => '// Header',
-    addHeader: vi.fn(),
-  },
-}));
-
-// Mock TypeHelper factory
-vi.mock('../../../src/core/generator/helpers/type.helper', () => ({
-  TypeHelper: {
-    getFileName: vi.fn(),
-    irTypeToString: vi.fn(),
-  },
-}));
+import { IrModel, IrService, IrType } from '../../../src/core/ir';
 
 describe('ServiceWriter', () => {
-  let projectMock: any;
-  let sourceFileMock: any;
-  let classMock: any;
-  let methodMock: any;
-
-  const outputDir = '/out';
+  let writer: ServiceWriter;
 
   beforeEach(() => {
-    // Setup Mocks
-    methodMock = {
-      setBodyText: vi.fn(),
-    };
-    classMock = {
-      addConstructor: vi.fn(),
-      addMethod: vi.fn().mockReturnValue(methodMock),
-    };
-    sourceFileMock = {
-      addClass: vi.fn().mockReturnValue(classMock),
-      formatText: vi.fn(),
-    };
-    projectMock = {
-      createSourceFile: vi.fn().mockReturnValue(sourceFileMock),
-    };
+    const printer = new AstPrinter();
+    const headerGenerator = new HeaderGenerator();
+    const importBuilder = new ImportBuilder();
+    const typeBuilder = new TypeBuilder();
+    const decoratorBuilder = new DecoratorBuilder();
+    const commentModifier = new CommentModifier();
+    const parameterBuilder = new ParameterBuilder(commentModifier);
+    const methodBuilder = new ServiceMethodBuilder(commentModifier);
+    const statementBuilder = new ServiceStatementBuilder();
 
-    vi.clearAllMocks();
-
-    // Default Helper Mocks
-    vi.mocked(TypeHelper.getFileName).mockImplementation((name) => name.toLowerCase());
-    // Default: return 'string' unless overridden in specific tests
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it('should write a basic service with http injection', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map(),
-    };
-
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
-
-    // Check File Creation
-    expect(projectMock.createSourceFile).toHaveBeenCalledWith(
-      `${outputDir}/services/userservice.service.ts`,
-      expect.any(String),
-      { overwrite: true },
+    writer = new ServiceWriter(
+      printer,
+      headerGenerator,
+      importBuilder,
+      typeBuilder,
+      decoratorBuilder,
+      parameterBuilder,
+      methodBuilder,
+      statementBuilder,
     );
-
-    // Check Import Helper Call
-    expect(ImportHelper.addServiceImports).toHaveBeenCalledWith(sourceFileMock, service, []);
-
-    // Check Class & Decorator
-    expect(sourceFileMock.addClass).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'UserService',
-        decorators: [{ name: 'Injectable', arguments: [] }],
-      }),
-    );
-
-    // Check Constructor Injection (should inject both HttpService and ApiConfiguration)
-    expect(classMock.addConstructor).toHaveBeenCalledWith({
-      parameters: [
-        {
-          name: 'httpService',
-          type: 'HttpService',
-          isReadonly: true,
-          scope: 'private',
-        },
-        {
-          name: 'config',
-          type: 'ApiConfiguration',
-          isReadonly: true,
-          scope: 'private',
-        },
-      ],
-    });
   });
 
-  it('should generate Observable and Promise methods for GET operation with required path param', async () => {
-    const service: IrService = {
-      name: 'UserService',
+  const makeModels = (...names: { name: string; isEnum?: boolean }[]): IrModel[] =>
+    names.map((m) => ({
+      name: m.name,
+      fileName: m.name
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+        .toLowerCase(),
+      isEnum: m.isEnum ?? false,
+      properties: [],
+      extends: undefined,
+      description: undefined,
+    }));
+
+  it('generates a complete service class with dual methods and RequestBuilder DI', async () => {
+    const mockService: IrService = {
+      name: 'GeocodingAPIService',
+      fileName: 'geocoding-api.service',
       operations: new Map([
         [
-          'getUser',
+          'geocodeSearch',
           {
-            methodName: 'getUser',
-            operationId: 'getUser',
+            methodName: 'geocodeSearch',
+            operationId: 'geocodeSearch',
+            path: '/v1/geocode/search',
             method: 'GET',
-            path: '/users/{id}',
-            parameters: [
-              { name: 'id', type: { rawType: 'string' }, isRequired: true, in: 'path' } as any,
-            ],
-            returnType: { rawType: 'UserDto' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockImplementation((t) => {
-      return t.rawType === 'UserDto' ? 'UserDto' : 'string';
-    });
-
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
-
-    // Check Observable Method Definition - required path param as separate argument
-    expect(classMock.addMethod).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'getUser$',
-        returnType: 'Observable<AxiosResponse<UserDto>>',
-        parameters: expect.arrayContaining([
-          { name: 'id', type: 'string', hasQuestionToken: false },
-        ]),
-      }),
-    );
-
-    // Check Promise Method Definition - same signature
-    expect(classMock.addMethod).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'getUser',
-        returnType: 'Promise<UserDto>',
-        parameters: expect.arrayContaining([
-          { name: 'id', type: 'string', hasQuestionToken: false },
-        ]),
-      }),
-    );
-  });
-
-  it('should generate correct body for Promise method (wrapper)', async () => {
-    const service: IrService = {
-      name: 'TestService',
-      operations: new Map([
-        [
-          'testOp',
-          {
-            methodName: 'testOp',
-            operationId: 'testOp',
-            method: 'GET',
-            path: '/test',
-            parameters: [],
-            returnType: { rawType: 'void' } as any,
-          },
-        ],
-      ]),
-    };
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Intercept Promise method body generation
-    const promiseMethodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'testOp',
-    );
-    expect(promiseMethodCall).toBeDefined();
-
-    // Verify setBodyText logic via mock writer
-    const writerCallback = methodMock.setBodyText.mock.calls[1][0]; // 0 is Observable, 1 is Promise
-    const writerMock = { writeLine: vi.fn() };
-    writerCallback(writerMock);
-
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'return firstValueFrom(this.testOp$()).then(response => response.data);',
-      ),
-    );
-  });
-
-  it('should generate correct body for Observable GET with single query param in params object', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'search',
-          {
-            operationId: 'searchUsers',
-            methodName: 'search',
-            method: 'GET',
-            path: '/users',
-            parameters: [{ name: 'q', in: 'query', type: { rawType: 'string' } } as any],
-            returnType: { rawType: 'UserDto[]' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('UserDto[]');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Get callback for Observable method
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Verify URL normalization
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedBase = (this.config.baseUrl ?? '').replace(/\\/$/, '');",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/users`.replace(/^\\//, '');",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const url = normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`;',
-    );
-
-    // Query params now grouped in params object
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const queryParams: Record<string, any> = {};',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.q !== undefined) queryParams['q'] = params.q;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('}');
-
-    // Verify Headers
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
-    );
-
-    // Verify HTTP Call with queryParams and headers
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.get<UserDto[]>(url, { ...this.config.httpOptions, params: queryParams, headers })',
-      ),
-    );
-  });
-
-  it('should group multiple query parameters into an object', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'search',
-          {
-            operationId: 'searchUsers',
-            methodName: 'search',
-            method: 'GET',
-            path: '/users',
-            parameters: [
-              { name: 'q', in: 'query', type: { rawType: 'string' }, isRequired: true } as any,
-              { name: 'limit', in: 'query', type: { rawType: 'number' } } as any,
-              { name: 'offset', in: 'query', type: { rawType: 'number' } } as any,
-            ],
-            returnType: { rawType: 'UserDto[]' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('UserDto[]');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify the method signature has 'params' object parameter
-    expect(classMock.addMethod).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'search$',
-        parameters: expect.arrayContaining([
-          {
-            name: 'params',
-            type: expect.stringContaining('q'),
-            hasQuestionToken: true,
-          },
-        ]),
-      }),
-    );
-
-    // Get callback for Observable method
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Verify params are grouped
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const queryParams: Record<string, any> = {};',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.q !== undefined) queryParams['q'] = params.q;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.limit !== undefined) queryParams['limit'] = params.limit;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.offset !== undefined) queryParams['offset'] = params.offset;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('}');
-  });
-
-  it('should generate correct body for POST with body and headers', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'create',
-          {
-            operationId: 'createUser',
-            methodName: 'create',
-            method: 'POST',
-            path: '/users',
-            parameters: [
-              { name: 'payload', in: 'body', type: { rawType: 'Dto' }, isRequired: true } as any,
-              { name: 'X-Auth', in: 'header', type: { rawType: 'string' } } as any,
-            ],
-            returnType: { rawType: 'Dto' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Verify Headers - now extracted from params object
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params['X-Auth'] !== undefined) headers['X-Auth'] = String(params['X-Auth']);",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('}');
-
-    // Verify HTTP Call (POST has body, no query params, just headers config)
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.post<string>(url, payload, { ...this.config.httpOptions, headers })',
-      ),
-    );
-  });
-
-  it('should generate DELETE request with path param in params object', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'remove',
-          {
-            operationId: 'deleteUser',
-            methodName: 'remove',
-            method: 'DELETE',
-            path: '/users/{id}',
-            parameters: [
-              { name: 'id', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
-            ],
-            returnType: { rawType: 'string' } as any,
-          },
-        ],
-      ]),
-    };
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = { writeLine: vi.fn(), write: vi.fn() };
-    writerCallback(writerMock);
-
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedBase = (this.config.baseUrl ?? '').replace(/\\/$/, '');",
-    );
-    // Required path param now accessed directly (not from params object)
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/users/${id}`.replace(/^\\//, '');",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const url = normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`;',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'return this.httpService.delete<string>(url, { ...this.config.httpOptions, headers });',
-    );
-  });
-
-  it('should generate POST request with query params in params object and no body', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'search',
-          {
-            operationId: 'searchUsers',
-            methodName: 'search',
-            method: 'POST',
-            path: '/users/search',
-            parameters: [
-              { name: 'q', in: 'query', type: { rawType: 'string' }, isRequired: false } as any,
-            ],
-            returnType: { rawType: 'string' } as any,
-          },
-        ],
-      ]),
-    };
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const queryParams: Record<string, any> = {};',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.q !== undefined) queryParams['q'] = params.q;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('}');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.post<string>(url, undefined, { ...this.config.httpOptions, params: queryParams, headers })',
-      ),
-    );
-  });
-
-  it('should generate PUT request with headers in params object', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'update',
-          {
-            operationId: 'updateUser',
-            methodName: 'update',
-            method: 'PUT',
-            path: '/users/update',
+            description: 'The Forward Geocoding API allows you to search.',
+            acceptHeader: 'application/json',
+            returnType: { rawType: 'GeocodingJsonResponse', isPrimitive: false, isArray: false },
             parameters: [
               {
-                name: 'X-Token',
-                in: 'header',
-                type: { rawType: 'string' },
+                name: 'text',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'query',
                 isRequired: false,
-              } as any,
+                description: 'A free-form text string',
+              },
             ],
-            returnType: { rawType: 'string' } as any,
           },
         ],
       ]),
     };
 
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
+    const allModels = makeModels({ name: 'GeocodingJsonResponse' });
+    const output = await writer.write(mockService, allModels, '1.0.0', 'Geocoding API', '1.0.0');
 
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
+    expect(output.generatedCode).toContain("import { Injectable } from '@nestjs/common';");
+    expect(output.generatedCode).toContain("import { HttpService } from '@nestjs/axios';");
+    expect(output.generatedCode).toContain(
+      "import { RequestBuilder } from '../request-builder.service';",
+    );
+    expect(output.generatedCode).toContain("import { Observable, firstValueFrom } from 'rxjs';");
+    expect(output.generatedCode).toContain(
+      "import { GeocodingJsonResponse } from '../dto/geocoding-json-response.dto';",
+    );
+    expect(output.generatedCode).toContain('@Injectable()');
+    expect(output.generatedCode).toContain('export class GeocodingAPIService {');
+    expect(output.generatedCode).toMatch(
+      /constructor\(\s*private readonly httpService: HttpService,\s*private readonly config: ApiConfiguration,\s*private readonly rb: RequestBuilder,?\s*\)\s*\{\}/,
+    );
 
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
+    // Method signature: nested params with a `query` branch
+    expect(output.generatedCode).toContain('public geocodeSearch$(');
+    expect(output.generatedCode).toContain('params?: {');
+    expect(output.generatedCode).toContain('query?: {');
+    expect(output.generatedCode).toContain('text?: string;');
+    expect(output.generatedCode).toMatch(/\): Observable<AxiosResponse<GeocodingJsonResponse>>/);
+
+    // URL construction via rb.buildUrl
+    expect(output.generatedCode).toContain('this.rb.buildUrl(');
+    expect(output.generatedCode).toContain("'/v1/geocode/search'");
+
+    // Query extraction via rb.buildQuery on the query sub-object
+    expect(output.generatedCode).toContain('this.rb.buildQuery(');
+    expect(output.generatedCode).toContain('params?.query');
+    expect(output.generatedCode).toContain("'text'");
+
+    // Headers setup: plain spread (no header params in this op) + Accept assignment
+    expect(output.generatedCode).toContain('const headers: Record<string, string>');
+    expect(output.generatedCode).toContain("headers['Accept'] = 'application/json'");
+
+    // HTTP call with generic type
+    expect(output.generatedCode).toContain(
+      'return this.httpService.get<GeocodingJsonResponse>(url,',
     );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params['X-Token'] !== undefined) headers['X-Token'] = String(params['X-Token']);",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('}');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.put<string>(url, undefined, { ...this.config.httpOptions, headers })',
-      ),
+    expect(output.generatedCode).toContain('params: queryParams');
+
+    // Promise method
+    expect(output.generatedCode).toContain('public geocodeSearch(');
+    expect(output.generatedCode).toMatch(/\): Promise<GeocodingJsonResponse>/);
+    expect(output.generatedCode).toContain(
+      '(res: AxiosResponse<GeocodingJsonResponse>) => res.data',
     );
   });
 
-  it('should generate POST request with body only (no config)', async () => {
-    const service: IrService = {
-      name: 'UserService',
+  it('generates a POST service with path params, body params, multipart/form-data, and array return type', async () => {
+    const mockService: IrService = {
+      name: 'FileService',
+      fileName: 'file.service',
       operations: new Map([
         [
-          'create',
+          'uploadUserFile',
           {
-            operationId: 'createUser',
-            methodName: 'create',
+            methodName: 'uploadUserFile',
+            operationId: 'uploadUserFile',
+            path: '/users/{userId}/files',
             method: 'POST',
-            path: '/users',
+            description: 'Upload a file for a user',
+            acceptHeader: 'application/json',
+            requestContentType: 'multipart/form-data',
             parameters: [
               {
-                name: 'payload',
-                in: 'body',
-                type: { rawType: 'CreateUserDto' },
+                name: 'userId',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
                 isRequired: true,
-              } as any,
+              },
+              {
+                name: 'file',
+                type: { rawType: 'UploadRequest', isPrimitive: false, isArray: false },
+                in: 'body',
+                isRequired: true,
+              },
             ],
-            returnType: { rawType: 'UserDto' } as any,
+            returnType: { rawType: 'FileMetaDto', isPrimitive: false, isArray: true },
           },
         ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('UserDto');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = { writeLine: vi.fn(), write: vi.fn() };
-    writerCallback(writerMock);
-
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedBase = (this.config.baseUrl ?? '').replace(/\\/$/, '');",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/users`.replace(/^\\//, '');",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const url = normalizedBase ? `${normalizedBase}/${normalizedPath}` : `/${normalizedPath}`;',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const headers: Record<string, string> = { ...(this.config.headers ?? {}) };',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'return this.httpService.post<UserDto>(url, payload, { ...this.config.httpOptions, headers });',
-    );
-  });
-
-  it('should generate Promise method with JSDoc description', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
         [
-          'getUser',
+          'importFile',
           {
-            operationId: 'getUser',
-            methodName: 'getUser',
-            method: 'GET',
-            path: '/users/{id}',
-            description: 'Fetches user details by ID',
-            parameters: [
-              { name: 'id', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
-            ],
-            returnType: { rawType: 'UserDto' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('UserDto');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify Promise method has docs
-    const promiseMethodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'getUser',
-    );
-    expect(promiseMethodCall).toBeDefined();
-    expect(promiseMethodCall![0].docs).toEqual([{ description: 'Fetches user details by ID' }]);
-
-    // Verify method signature has required path param as separate argument
-    expect(promiseMethodCall![0].parameters).toEqual([
-      {
-        name: 'id',
-        type: 'UserDto',
-        hasQuestionToken: false,
-      },
-    ]);
-  });
-
-  it('should execute Promise method body callback correctly with params object', async () => {
-    const service: IrService = {
-      name: 'TestService',
-      operations: new Map([
-        [
-          'fetchData',
-          {
-            operationId: 'fetchData',
-            methodName: 'fetchData',
-            method: 'GET',
-            path: '/data',
-            parameters: [
-              { name: 'id', in: 'query', type: { rawType: 'string' }, isRequired: false } as any,
-              { name: 'limit', in: 'query', type: { rawType: 'number' }, isRequired: false } as any,
-            ],
-            returnType: { rawType: 'DataDto' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Get Promise method body callback (second call to setBodyText)
-    const promiseBodyCallback = methodMock.setBodyText.mock.calls[1][0];
-    const writerMock = { writeLine: vi.fn() };
-    promiseBodyCallback(writerMock);
-
-    // Now forwards params object instead of individual params
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'return firstValueFrom(this.fetchData$(params)).then(response => response.data);',
-      ),
-    );
-  });
-
-  it('should handle operations with mixed parameter types (path + query + header + body)', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'complexOperation',
-          {
-            operationId: 'complexOperation',
-            methodName: 'complexOperation',
+            methodName: 'importFile',
+            operationId: 'importFile',
+            path: '/imports/{kind}',
             method: 'POST',
-            path: '/users/{userId}/posts/{postId}',
+            requestContentType: 'multipart/form-data',
             parameters: [
-              { name: 'userId', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
-              { name: 'postId', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
+              {
+                name: 'kind',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
+                isRequired: true,
+              },
+              {
+                name: 'body',
+                type: {
+                  rawType: '{ params?: ImportedFileNew; file?: Buffer | ReadStream }',
+                  isPrimitive: false,
+                  isArray: false,
+                  referencedTypes: ['ImportedFileNew'],
+                },
+                in: 'body',
+                isRequired: false,
+              },
+            ],
+            returnType: { rawType: 'string', isPrimitive: true, isArray: false },
+          },
+        ],
+      ]),
+    };
+
+    const allModels = makeModels(
+      { name: 'UploadRequest' },
+      { name: 'FileMetaDto' },
+      { name: 'ImportedFileNew' },
+    );
+    const output = await writer.write(mockService, allModels, '1.0.0', 'File API', '2.0.0');
+
+    expect(output.generatedCode).toContain(
+      "import { FileMetaDto } from '../dto/file-meta-dto.dto';",
+    );
+    expect(output.generatedCode).toContain(
+      "import { UploadRequest } from '../dto/upload-request.dto';",
+    );
+    expect(output.generatedCode).toContain('export class FileService {');
+    expect(output.generatedCode).toContain('userId: string');
+    expect(output.generatedCode).toContain('file: UploadRequest');
+    expect(output.generatedCode).toContain('Observable<AxiosResponse<FileMetaDto[]>>');
+    expect(output.generatedCode).toContain('Promise<FileMetaDto[]>');
+
+    expect(output.generatedCode).toContain("'/users/{userId}/files'");
+    expect(output.generatedCode).toMatch(/\{\s*userId,?\s*\}/);
+
+    // multipart: header set + body passed raw (axios auto-serializes)
+    expect(output.generatedCode).toContain("headers['Content-Type'] = 'multipart/form-data'");
+    expect(output.generatedCode).toMatch(
+      /this\.httpService\.post<FileMetaDto\[\]>\(\s*url,\s*file,/,
+    );
+
+    // Promise method
+    expect(output.generatedCode).toContain('(res: AxiosResponse<FileMetaDto[]>) => res.data');
+
+    // referencedTypes: DTO inside inline object body should be imported
+    expect(output.generatedCode).toContain(
+      "import { ImportedFileNew } from '../dto/imported-file-new.dto';",
+    );
+
+    expect(output.generatedCode).toContain("import { ReadStream } from 'fs';");
+  });
+
+  it('extracts header params via rb.buildHeaders and keeps query params on the query sub-object', async () => {
+    const mockService: IrService = {
+      name: 'AuthenticatedService',
+      fileName: 'authenticated.service',
+      operations: new Map([
+        [
+          'getSecureResource',
+          {
+            methodName: 'getSecureResource',
+            operationId: 'getSecureResource',
+            path: '/secure',
+            method: 'GET',
+            acceptHeader: 'application/octet-stream',
+            responseType: 'blob',
+            parameters: [
+              {
+                name: 'authorization',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'header',
+                isRequired: true,
+              },
+              {
+                name: 'format',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'query',
+                isRequired: false,
+              },
+            ],
+            returnType: {
+              rawType: ['SecureResourceDto', 'ErrorDto'],
+              isPrimitive: false,
+              isArray: false,
+              composition: 'union' as const,
+            },
+          },
+        ],
+      ]),
+    };
+
+    const allModels = makeModels({ name: 'SecureResourceDto' }, { name: 'ErrorDto' });
+    const output = await writer.write(mockService, allModels, '1.0.0', 'Secure API', '1.0.0');
+
+    expect(output.generatedCode).toContain('export class AuthenticatedService {');
+    expect(output.generatedCode).toContain(
+      "import { SecureResourceDto } from '../dto/secure-resource-dto.dto';",
+    );
+    expect(output.generatedCode).toContain('authorization: string;');
+    expect(output.generatedCode).toContain('format?: string;');
+    expect(output.generatedCode).toContain('public getSecureResource$(');
+    expect(output.generatedCode).toContain('query?: {');
+    expect(output.generatedCode).toContain('headers?: {');
+
+    // Query goes through rb.buildQuery with the query branch as source
+    expect(output.generatedCode).toContain('this.rb.buildQuery(');
+    expect(output.generatedCode).toContain('params?.query');
+    expect(output.generatedCode).toContain("'format'");
+
+    // Header goes through rb.buildHeaders with the headers branch as extras
+    expect(output.generatedCode).toContain('this.rb.buildHeaders(');
+    expect(output.generatedCode).toContain('this.config.headers');
+    expect(output.generatedCode).toContain('params?.headers');
+    expect(output.generatedCode).toContain("'authorization'");
+
+    expect(output.generatedCode).toContain("responseType: 'blob'");
+    expect(output.generatedCode).toContain("headers['Accept'] = 'application/octet-stream'");
+
+    expect(output.generatedCode).toContain("import { ErrorDto } from '../dto/error-dto.dto';");
+    expect(output.generatedCode).toContain('SecureResourceDto | ErrorDto');
+  });
+
+  it('emits an intersection return type when the operation returnType has composition: intersection', async () => {
+    const mockService: IrService = {
+      name: 'AuditService',
+      fileName: 'audit.service',
+      operations: new Map([
+        [
+          'getPostAuditTrail',
+          {
+            methodName: 'getPostAuditTrail',
+            operationId: 'getPostAuditTrail',
+            path: '/posts/{id}/audit-trail',
+            method: 'GET',
+            acceptHeader: 'application/json',
+            parameters: [
+              {
+                name: 'id',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
+                isRequired: true,
+              },
+            ],
+            returnType: {
+              rawType: ['Post', 'AuditInfo'],
+              isPrimitive: false,
+              isArray: false,
+              composition: 'intersection' as const,
+            },
+          },
+        ],
+      ]),
+    };
+
+    const allModels = makeModels({ name: 'Post' }, { name: 'AuditInfo' });
+    const output = await writer.write(mockService, allModels, '1.0.0', 'Audit API', '1.0.0');
+
+    expect(output.generatedCode).toContain('export class AuditService {');
+    expect(output.generatedCode).toContain("import { Post } from '../dto/post.dto';");
+    expect(output.generatedCode).toContain("import { AuditInfo } from '../dto/audit-info.dto';");
+    expect(output.generatedCode).toContain('Observable<AxiosResponse<Post & AuditInfo>>');
+    expect(output.generatedCode).toContain('Promise<Post & AuditInfo>');
+  });
+
+  it('keeps query and header params strictly in their own sub-branches (sentinel against routing regression)', async () => {
+    const mockService: IrService = {
+      name: 'VoucherInfoService',
+      fileName: 'voucher-info.service',
+      operations: new Map([
+        [
+          'verifyVoucher',
+          {
+            methodName: 'verifyVoucher',
+            operationId: 'verifyVoucher',
+            path: '/voucher-info/{token}',
+            method: 'GET',
+            parameters: [
+              {
+                name: 'token',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
+                isRequired: true,
+              },
+              {
+                name: 'fields',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'query',
+                isRequired: false,
+              },
+              {
+                name: 'pin',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'header',
+                isRequired: false,
+              },
+            ],
+            returnType: { rawType: 'string', isPrimitive: true, isArray: false },
+          },
+        ],
+      ]),
+    };
+
+    const output = await writer.write(mockService, makeModels(), '1.0.0', 'Voucher API', '1.0.0');
+
+    // The query whitelist passed to rb.buildQuery contains 'fields' only (never 'pin')
+    expect(output.generatedCode).toMatch(
+      /this\.rb\.buildQuery\([\s\S]*?'fields'[\s\S]*?\] as const,?\s*\)/,
+    );
+
+    // The header whitelist passed to rb.buildHeaders contains 'pin' only (never 'fields')
+    expect(output.generatedCode).toMatch(
+      /this\.rb\.buildHeaders\([\s\S]*?'pin'[\s\S]*?\] as const,?\s*\)/,
+    );
+
+    // Path is positional, no longer a body of a template literal
+    expect(output.generatedCode).toContain('token: string,');
+    expect(output.generatedCode).toContain("'/voucher-info/{token}'");
+    expect(output.generatedCode).toMatch(/\{\s*token,?\s*\}/);
+  });
+
+  it('emits the rb.buildQuery styles map for non-default OpenAPI style+explode combinations', async () => {
+    const mockService: IrService = {
+      name: 'SearchService',
+      fileName: 'search.service',
+      operations: new Map([
+        [
+          'searchItems',
+          {
+            methodName: 'searchItems',
+            operationId: 'searchItems',
+            path: '/search',
+            method: 'GET',
+            parameters: [
+              {
+                name: 'ids',
+                type: { rawType: 'string', isPrimitive: true, isArray: true },
+                in: 'query',
+                isRequired: false,
+                style: 'form',
+                explode: false,
+              },
+              {
+                name: 'tags',
+                type: { rawType: 'string', isPrimitive: true, isArray: true },
+                in: 'query',
+                isRequired: false,
+                style: 'pipeDelimited',
+              },
+              {
+                name: 'coords',
+                type: { rawType: 'number', isPrimitive: true, isArray: true },
+                in: 'query',
+                isRequired: false,
+                style: 'spaceDelimited',
+              },
               {
                 name: 'filter',
+                type: { rawType: 'any', isPrimitive: true, isArray: false },
                 in: 'query',
-                type: { rawType: 'string' },
                 isRequired: false,
-              } as any,
-              { name: 'limit', in: 'query', type: { rawType: 'number' }, isRequired: false } as any,
+                style: 'deepObject',
+              },
               {
-                name: 'X-Tenant-Id',
-                in: 'header',
-                type: { rawType: 'string' },
+                name: 'limit',
+                type: { rawType: 'number', isPrimitive: true, isArray: false },
+                in: 'query',
                 isRequired: false,
-              } as any,
+              },
+            ],
+            returnType: { rawType: 'string', isPrimitive: true, isArray: true },
+          },
+        ],
+      ]),
+    };
+
+    const output = await writer.write(mockService, makeModels(), '1.0.0', 'Search API', '1.0.0');
+
+    expect(output.generatedCode).toContain('this.rb.buildQuery(');
+    expect(output.generatedCode).toContain("ids: 'csv'");
+    expect(output.generatedCode).toContain("tags: 'pipe'");
+    expect(output.generatedCode).toContain("coords: 'space'");
+    expect(output.generatedCode).toContain("filter: 'deep'");
+  });
+
+  it('falls back to any when returnType is undefined and emits no params object for path-less operations', async () => {
+    const mockService: IrService = {
+      name: 'HealthService',
+      fileName: 'health.service',
+      operations: new Map([
+        [
+          'ping',
+          {
+            methodName: 'ping',
+            operationId: 'ping',
+            path: '/ping',
+            method: 'GET',
+            parameters: [],
+            returnType: undefined as unknown as IrType,
+          },
+        ],
+      ]),
+    };
+
+    const output = await writer.write(mockService, [], '1.0.0', 'Health API', '1.0.0');
+
+    expect(output.generatedCode).toContain('export class HealthService {');
+    expect(output.generatedCode).toContain('Observable<AxiosResponse<any>>');
+    expect(output.generatedCode).toContain('Promise<any>');
+    expect(output.generatedCode).toContain('(res: AxiosResponse<any>) => res.data');
+
+    expect(output.generatedCode).toContain("this.rb.buildUrl('/ping')");
+  });
+
+  it('uses .enum extension for enum types and orders params: required body → path → optional body → params', async () => {
+    const mockService: IrService = {
+      name: 'ImportService',
+      fileName: 'import.service',
+      operations: new Map([
+        [
+          'listFiles',
+          {
+            methodName: 'listFiles',
+            operationId: 'listFiles',
+            path: '/files/{userId}',
+            method: 'POST',
+            acceptHeader: 'application/json',
+            parameters: [
               {
-                name: 'payload',
-                in: 'body',
-                type: { rawType: 'CreateDto' },
+                name: 'userId',
+                type: { rawType: 'string', isPrimitive: true, isArray: false },
+                in: 'path',
                 isRequired: true,
-              } as any,
-            ],
-            returnType: { rawType: 'ResultDto' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify method signature: body first, then required path params, then optional params object
-    const methodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'complexOperation$',
-    );
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(4);
-    expect(methodCall![0].parameters[0].name).toBe('payload');
-    expect(methodCall![0].parameters[1].name).toBe('userId');
-    expect(methodCall![0].parameters[1].hasQuestionToken).toBe(false); // required
-    expect(methodCall![0].parameters[2].name).toBe('postId');
-    expect(methodCall![0].parameters[2].hasQuestionToken).toBe(false); // required
-    expect(methodCall![0].parameters[3].name).toBe('params');
-    expect(methodCall![0].parameters[3].type).toContain('filter');
-    expect(methodCall![0].parameters[3].type).toContain('X-Tenant-Id');
-
-    // Verify method body
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Path params interpolated directly (not from params object)
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/users/${userId}/posts/${postId}`.replace(/^\\//, '');",
-    );
-
-    // Query params extracted from params
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const queryParams: Record<string, any> = {};',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.filter !== undefined) queryParams['filter'] = params.filter;",
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.limit !== undefined) queryParams['limit'] = params.limit;",
-    );
-
-    // Headers extracted from params
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params['X-Tenant-Id'] !== undefined) headers['X-Tenant-Id'] = String(params['X-Tenant-Id']);",
-    );
-
-    // HTTP call with body
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.post<string>(url, payload, { ...this.config.httpOptions, params: queryParams, headers })',
-      ),
-    );
-  });
-
-  it('should handle operations with many query parameters (5+)', async () => {
-    const service: IrService = {
-      name: 'SearchService',
-      operations: new Map([
-        [
-          'advancedSearch',
-          {
-            operationId: 'advancedSearch',
-            methodName: 'advancedSearch',
-            method: 'GET',
-            path: '/search',
-            parameters: [
-              { name: 'query', in: 'query', type: { rawType: 'string' }, isRequired: false } as any,
+              },
               {
-                name: 'category',
-                in: 'query',
-                type: { rawType: 'string' },
-                isRequired: false,
-              } as any,
+                name: 'body',
+                type: { rawType: 'FileRequest', isPrimitive: false, isArray: false },
+                in: 'body',
+                isRequired: true,
+              },
               {
-                name: 'minPrice',
-                in: 'query',
-                type: { rawType: 'number' },
+                name: 'metadata',
+                type: { rawType: 'FileMetadata', isPrimitive: false, isArray: false },
+                in: 'body',
                 isRequired: false,
-              } as any,
-              {
-                name: 'maxPrice',
-                in: 'query',
-                type: { rawType: 'number' },
-                isRequired: false,
-              } as any,
-              { name: 'page', in: 'query', type: { rawType: 'number' }, isRequired: false } as any,
-              {
-                name: 'pageSize',
-                in: 'query',
-                type: { rawType: 'number' },
-                isRequired: false,
-              } as any,
-              {
-                name: 'sortBy',
-                in: 'query',
-                type: { rawType: 'string' },
-                isRequired: false,
-              } as any,
-            ],
-            returnType: { rawType: 'SearchResult[]' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify all query params are in params object
-    const methodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'advancedSearch$',
-    );
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(1);
-    expect(methodCall![0].parameters[0].name).toBe('params');
-    expect(methodCall![0].parameters[0].type).toContain('query');
-    expect(methodCall![0].parameters[0].type).toContain('category');
-    expect(methodCall![0].parameters[0].type).toContain('minPrice');
-    expect(methodCall![0].parameters[0].type).toContain('maxPrice');
-    expect(methodCall![0].parameters[0].type).toContain('page');
-    expect(methodCall![0].parameters[0].type).toContain('pageSize');
-    expect(methodCall![0].parameters[0].type).toContain('sortBy');
-  });
-
-  it('should handle required path parameters as separate arguments', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'getUserPosts',
-          {
-            operationId: 'getUserPosts',
-            methodName: 'getUserPosts',
-            method: 'GET',
-            path: '/users/{userId}/posts',
-            parameters: [
-              { name: 'userId', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
+              },
               {
                 name: 'status',
+                type: { rawType: 'FileStatusEnum', isPrimitive: false, isArray: false },
                 in: 'query',
-                type: { rawType: 'string' },
                 isRequired: false,
-              } as any,
+              },
             ],
-            returnType: { rawType: 'Post[]' } as any,
+            returnType: { rawType: 'FileResult', isPrimitive: false, isArray: true },
           },
         ],
       ]),
     };
 
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify signature: userId is a required separate argument, params contains only query params
-    const methodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'getUserPosts$',
+    const allModels = makeModels(
+      { name: 'FileStatusEnum', isEnum: true },
+      { name: 'FileResult' },
+      { name: 'FileRequest' },
+      { name: 'FileMetadata' },
     );
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(2);
+    const output = await writer.write(mockService, allModels, '1.0.0', 'File API', '1.0.0');
 
-    // First param is the required path param
-    expect(methodCall![0].parameters[0].name).toBe('userId');
-    expect(methodCall![0].parameters[0].hasQuestionToken).toBe(false);
+    expect(output.generatedCode).toContain(
+      "import { FileStatusEnum } from '../dto/file-status-enum.enum';",
+    );
+    expect(output.generatedCode).toContain("import { FileResult } from '../dto/file-result.dto';");
 
-    // Second param is the params object with query params
-    expect(methodCall![0].parameters[1].name).toBe('params');
-    expect(methodCall![0].parameters[1].hasQuestionToken).toBe(true);
-    expect(methodCall![0].parameters[1].type).toMatch(/status\?:\s*string/);
+    const methodSignature =
+      output.generatedCode.match(/public listFiles\$\(([\s\S]*?)\): Observable/)?.[1] ?? '';
+    const bodyIdx = methodSignature.indexOf('body: FileRequest');
+    const userIdIdx = methodSignature.indexOf('userId: string');
+    const metadataIdx = methodSignature.indexOf('metadata?: FileMetadata');
+    const paramsIdx = methodSignature.indexOf('params?: {');
+
+    expect(bodyIdx).toBeGreaterThanOrEqual(0);
+    expect(userIdIdx).toBeGreaterThan(bodyIdx);
+    expect(metadataIdx).toBeGreaterThan(userIdIdx);
+    expect(paramsIdx).toBeGreaterThan(metadataIdx);
   });
 
-  it('should handle operations with only path parameters', async () => {
-    const service: IrService = {
-      name: 'UserService',
+  it('handles application/x-www-form-urlencoded as form data', async () => {
+    const mockService: IrService = {
+      name: 'FormService',
+      fileName: 'form.service',
       operations: new Map([
         [
-          'getUser',
+          'submitForm',
           {
-            operationId: 'getUser',
-            methodName: 'getUser',
-            method: 'GET',
-            path: '/users/{userId}',
-            parameters: [
-              { name: 'userId', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
-            ],
-            returnType: { rawType: 'User' } as any,
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
-
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify required path param is a separate argument, not in params object
-    const methodCall = classMock.addMethod.mock.calls.find((c: any) => c[0].name === 'getUser$');
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(1);
-    expect(methodCall![0].parameters[0].name).toBe('userId');
-    expect(methodCall![0].parameters[0].hasQuestionToken).toBe(false);
-
-    // Verify URL interpolation uses direct argument
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = { writeLine: vi.fn(), write: vi.fn() };
-    writerCallback(writerMock);
-
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/users/${userId}`.replace(/^\\//, '');",
-    );
-  });
-
-  it('should handle POST with body and params (query + path)', async () => {
-    const service: IrService = {
-      name: 'PostService',
-      operations: new Map([
-        [
-          'createComment',
-          {
-            operationId: 'createComment',
-            methodName: 'createComment',
+            methodName: 'submitForm',
+            operationId: 'submitForm',
+            path: '/form',
             method: 'POST',
-            path: '/posts/{postId}/comments',
+            requestContentType: 'application/x-www-form-urlencoded',
             parameters: [
-              { name: 'postId', in: 'path', type: { rawType: 'string' }, isRequired: true } as any,
               {
-                name: 'notify',
-                in: 'query',
-                type: { rawType: 'boolean' },
-                isRequired: false,
-              } as any,
-              {
-                name: 'comment',
+                name: 'data',
+                type: { rawType: 'FormDataDto', isPrimitive: false, isArray: false },
                 in: 'body',
-                type: { rawType: 'CommentDto' },
                 isRequired: true,
-              } as any,
+              },
             ],
-            returnType: { rawType: 'Comment' } as any,
+            returnType: { rawType: 'string', isPrimitive: true, isArray: false },
           },
         ],
       ]),
     };
 
-    vi.mocked(TypeHelper.irTypeToString).mockReturnValue('string');
+    const allModels = makeModels({ name: 'FormDataDto' });
+    const output = await writer.write(mockService, allModels, '1.0.0', 'Form API', '1.0.0');
 
-    const writer = new ServiceWriter(projectMock, outputDir);
-    await writer.writeAll([service]);
-
-    // Verify signature: body first, required path param second, params third
-    const methodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'createComment$',
-    );
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(3);
-    expect(methodCall![0].parameters[0].name).toBe('comment');
-    expect(methodCall![0].parameters[0].hasQuestionToken).toBe(false); // required body
-    expect(methodCall![0].parameters[1].name).toBe('postId');
-    expect(methodCall![0].parameters[1].hasQuestionToken).toBe(false); // required path param
-    expect(methodCall![0].parameters[2].name).toBe('params');
-    expect(methodCall![0].parameters[2].type).toContain('notify');
-
-    // Verify method body handles both path and query params
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Path param in URL (required path params are now separate arguments)
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "const normalizedPath = `/posts/${postId}/comments`.replace(/^\\//, '');",
-    );
-
-    // Query param extracted
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      'const queryParams: Record<string, any> = {};',
-    );
-    expect(writerMock.writeLine).toHaveBeenCalledWith('if (params) {');
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      "if (params.notify !== undefined) queryParams['notify'] = params.notify;",
-    );
-
-    // HTTP call with body and params
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'this.httpService.post<string>(url, comment, { ...this.config.httpOptions, params: queryParams, headers })',
-      ),
+    expect(output.generatedCode).toContain('return this.httpService.post<string>(url, data, {');
+    expect(output.generatedCode).toContain(
+      "headers['Content-Type'] = 'application/x-www-form-urlencoded'",
     );
   });
 
-  it('should handle multipart/form-data uploads with Accept and responseType', async () => {
-    const service: IrService = {
-      name: 'ImageService',
+  it('skips import for a custom type not found in the model registry', async () => {
+    const mockService: IrService = {
+      name: 'MissingModelService',
+      fileName: 'missing-model.service',
       operations: new Map([
         [
-          'uploadImage',
+          'getData',
           {
-            methodName: 'uploadImage',
-            operationId: 'uploadImage',
-            method: 'POST',
-            path: '/users/{userId}/images',
-            parameters: [
-              { name: 'userId', type: { rawType: 'string' }, isRequired: true, in: 'path' } as any,
-              { name: 'body', type: { rawType: 'any' }, isRequired: false, in: 'body' } as any,
-              { name: 'name', type: { rawType: 'string' }, isRequired: false, in: 'query' } as any,
-            ],
-            returnType: { rawType: 'string' } as any,
-            requestContentType: 'multipart/form-data',
-            acceptHeader: 'text/plain',
-            responseType: 'text',
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockImplementation((t) => {
-      if (t.rawType === 'string') return 'string';
-      if (t.rawType === 'any') return 'any';
-      return typeof t.rawType === 'string' ? t.rawType : 'any';
-    });
-
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
-
-    // Verify method signature: userId (required path) first, body (optional) second, params third
-    const methodCall = classMock.addMethod.mock.calls.find(
-      (c: any) => c[0].name === 'uploadImage$',
-    );
-    expect(methodCall).toBeDefined();
-    expect(methodCall![0].parameters).toHaveLength(3);
-    expect(methodCall![0].parameters[0].name).toBe('userId');
-    expect(methodCall![0].parameters[0].hasQuestionToken).toBe(false); // required path param
-    expect(methodCall![0].parameters[1].name).toBe('body');
-    expect(methodCall![0].parameters[1].hasQuestionToken).toBe(true); // optional body
-    expect(methodCall![0].parameters[2].name).toBe('params');
-    expect(methodCall![0].parameters[2].hasQuestionToken).toBe(true); // optional
-
-    // Verify method body
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Check Accept header is set
-    expect(writerMock.writeLine).toHaveBeenCalledWith("headers['Accept'] = 'text/plain';");
-
-    // Check responseType is included in config
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining("responseType: 'text'"),
-    );
-
-    // Check that multipart Content-Type is NOT set (axios will set it with boundary)
-    expect(writerMock.writeLine).not.toHaveBeenCalledWith(
-      expect.stringContaining("headers['Content-Type'] = 'multipart/form-data'"),
-    );
-  });
-
-  it('should handle Buffer responses for image endpoints', async () => {
-    const service: IrService = {
-      name: 'ImageService',
-      operations: new Map([
-        [
-          'getImage',
-          {
-            methodName: 'getImage',
-            operationId: 'getImage',
+            methodName: 'getData',
+            operationId: 'getData',
+            path: '/data',
             method: 'GET',
-            path: '/images/{imageId}',
-            parameters: [
-              { name: 'imageId', type: { rawType: 'string' }, isRequired: true, in: 'path' } as any,
-            ],
-            returnType: { rawType: 'Buffer' } as any,
-            acceptHeader: 'image/png',
-            responseType: 'arraybuffer',
-          },
-        ],
-      ]),
-    };
-
-    vi.mocked(TypeHelper.irTypeToString).mockImplementation((t) => {
-      return t.rawType === 'Buffer' ? 'Buffer' : 'string';
-    });
-
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
-
-    // Verify method body
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
-    };
-    writerCallback(writerMock);
-
-    // Check Accept header is set
-    expect(writerMock.writeLine).toHaveBeenCalledWith("headers['Accept'] = 'image/png';");
-
-    // Check responseType is arraybuffer (for Node.js Buffer)
-    expect(writerMock.writeLine).toHaveBeenCalledWith(
-      expect.stringContaining("responseType: 'arraybuffer'"),
-    );
-  });
-
-  it('should include JSDoc for parameter description in params object', async () => {
-    const service: IrService = {
-      name: 'UserService',
-      operations: new Map([
-        [
-          'getUser',
-          {
-            methodName: 'getUser',
-            operationId: 'getUser',
-            method: 'GET',
-            path: '/users',
             parameters: [
               {
                 name: 'filter',
-                type: { rawType: 'string' },
-                isRequired: false,
+                type: { rawType: 'UnknownType', isPrimitive: false, isArray: false },
                 in: 'query',
-                description: 'Filter users by name',
-              } as any,
+                isRequired: false,
+              },
             ],
-            returnType: { rawType: 'User[]' } as any,
+            returnType: { rawType: 'string', isPrimitive: true, isArray: false },
           },
         ],
       ]),
     };
 
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
+    const output = await writer.write(mockService, [], '1.0.0', 'Missing API', '1.0.0');
 
-    // Check that the parameter type definition includes the description (it's in the inline type string)
-    const methodCall = classMock.addMethod.mock.calls.find((call: any) =>
-      call[0].name.includes('getUser'),
-    );
-    expect(methodCall).toBeDefined();
-    const paramType = methodCall[0].parameters[0].type;
-    expect(paramType).toContain('Filter users by name');
+    expect(output.generatedCode).toContain('export class MissingModelService {');
+    expect(output.generatedCode).toContain('filter?: UnknownType');
   });
 
-  it('should handle non-JSON Content-Type headers (except multipart)', async () => {
-    const service: IrService = {
-      name: 'FileService',
+  it('emits string-literal union for anonymous string enums (no fallback to any)', async () => {
+    const mockService: IrService = {
+      name: 'CatsService',
+      fileName: 'cats.service',
       operations: new Map([
         [
-          'uploadText',
+          'getCat',
           {
-            methodName: 'uploadText',
-            operationId: 'uploadText',
-            method: 'POST',
-            path: '/files/text',
+            methodName: 'getCat',
+            operationId: 'getCat',
+            path: '/cat',
+            method: 'GET',
             parameters: [
-              { name: 'body', type: { rawType: 'string' }, isRequired: false, in: 'body' } as any,
+              {
+                name: 'type',
+                type: {
+                  rawType: ['square', 'medium', 'small', 'xsmall'],
+                  isPrimitive: true,
+                  isArray: false,
+                  composition: 'union' as const,
+                },
+                in: 'query',
+                isRequired: false,
+              },
             ],
-            returnType: { rawType: 'void' } as any,
-            requestContentType: 'text/plain',
+            returnType: { rawType: 'string', isPrimitive: true, isArray: false },
           },
         ],
       ]),
     };
 
-    const writer = new ServiceWriter(projectMock, outputDir, []);
-    await writer.writeAll([service]);
+    const output = await writer.write(mockService, [], '1.0.0', 'Cataas', '1.0.0');
 
-    const writerCallback = methodMock.setBodyText.mock.calls[0][0];
-    const writerMock = {
-      writeLine: vi.fn(),
-      write: vi.fn(),
-      indent: vi.fn().mockImplementation((cb) => cb()),
+    expect(output.generatedCode).toContain("type?: 'square' | 'medium' | 'small' | 'xsmall'");
+  });
+
+  it('emits inline TS type literal for object-with-properties response (no fallback to any)', async () => {
+    const mockService: IrService = {
+      name: 'CountService',
+      fileName: 'count.service',
+      operations: new Map([
+        [
+          'apiCount',
+          {
+            methodName: 'apiCount',
+            operationId: 'apiCount',
+            path: '/api/count',
+            method: 'GET',
+            parameters: [],
+            returnType: {
+              rawType: '{ count?: number }',
+              isPrimitive: false,
+              isArray: false,
+            },
+          },
+        ],
+      ]),
     };
-    writerCallback(writerMock);
 
-    // Check that text/plain Content-Type IS set (it's not multipart)
-    expect(writerMock.writeLine).toHaveBeenCalledWith("headers['Content-Type'] = 'text/plain';");
+    const output = await writer.write(mockService, [], '1.0.0', 'Cataas', '1.0.0');
+
+    expect(output.generatedCode).toContain('Observable<AxiosResponse<{ count?: number }>>');
+    expect(output.generatedCode).toContain('Promise<{ count?: number }>');
   });
 });

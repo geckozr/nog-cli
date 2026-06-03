@@ -71,7 +71,7 @@ describe('Logger', () => {
 
   describe('debug', () => {
     it('should NOT log debug messages when debug mode is OFF', () => {
-      // Forziamo la proprietà privata statica per il test
+      // Reach into the private static so we can toggle the mode for this test.
       (Logger as any).isDebugMode = false;
 
       Logger.debug('Debug message');
@@ -79,7 +79,7 @@ describe('Logger', () => {
     });
 
     it('should log debug messages when debug mode is ON', () => {
-      // Forziamo la proprietà privata statica per il test
+      // Reach into the private static so we can toggle the mode for this test.
       (Logger as any).isDebugMode = true;
 
       Logger.debug('Debug message');

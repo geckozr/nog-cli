@@ -1,115 +1,118 @@
-import { ClassDeclaration, Project, PropertyDeclaration, Scope, SourceFile } from 'ts-morph';
+import ts from 'typescript';
 
-import { toKebabCase } from '../../../utils';
-import { IrModel, IrProperty } from '../../ir/interfaces';
-import { DecoratorHelper } from '../helpers/decorator.helper';
-import { FileHeaderHelper } from '../helpers/file-header.helper';
-import { ImportHelper } from '../helpers/import.helper';
+import { Logger } from '../../../utils/logger';
+import { toKebabCase } from '../../../utils/naming';
+import { IrModel, IrProperty, IrType, IrValidator, VALIDATOR_DECORATOR_MAP } from '../../ir';
 import { TypeHelper } from '../helpers/type.helper';
+import { AstPrinter, IAstPrintedFile } from './core/ast-printer';
+import { CommentModifier } from './core/comment-modifier';
+import { DeclarationBuilder } from './core/declaration-builder';
+import { DecoratorBuilder } from './core/decorator-builder';
+import { ExpressionBuilder } from './core/expression-builder';
+import { HeaderGenerator } from './core/header-generator';
+import { ImportBuilder } from './core/import-builder';
+import { PropertyBuilder } from './core/property-builder';
+import { PrimitiveTypeName, TypeBuilder, isPrimitiveTypeName } from './core/type-builder';
 
-/**
- * Generates Data Transfer Object (DTO) and Enum files from the Internal Representation.
- *
- * Emission Strategy:
- * - **Pure OneOf Models**: Union types with discriminator but no properties → rendered as type aliases.
- * - **Hybrid Models**: Classes with properties, inheritance, or mixed composition → rendered as classes with validation decorators.
- * - **Enums**: Simple value enumerations → rendered as TypeScript enums with sanitized member names.
- *
- * Each model is emitted with:
- * - Class-validator decorators for runtime validation.
- * - Class-transformer type hints for deserialization.
- * - JSDoc documentation from OpenAPI schema descriptions.
- * - Standard file header with generation metadata.
- */
 export class DtoWriter {
-  /**
-   * Instantiates the DTO writer.
-   *
-   * @param project - The ts-morph Project instance for AST manipulation.
-   * @param outputDir - The target directory where DTO files will be written.
-   * @param allModels - The complete list of IR models (used for resolving cross-references and parent types).
-   * @param specTitle - The OpenAPI specification title for file header metadata.
-   * @param specVersion - The OpenAPI specification version for file header metadata.
-   */
   constructor(
-    private readonly project: Project,
-    private readonly outputDir: string,
-    private allModels: IrModel[] = [],
-    private readonly specTitle: string = 'Unknown Spec',
-    private readonly specVersion: string = 'Unknown Version',
+    private readonly printer: AstPrinter,
+    private readonly headerGenerator: HeaderGenerator,
+    private readonly importBuilder: ImportBuilder,
+    private readonly typeBuilder: TypeBuilder,
+    private readonly declarationBuilder: DeclarationBuilder,
+    private readonly decoratorBuilder: DecoratorBuilder,
+    private readonly propertyBuilder: PropertyBuilder,
+    private readonly commentModifier: CommentModifier,
+    private readonly expressionBuilder: ExpressionBuilder,
   ) {}
 
   /**
-   * Writes all provided models as DTO classes or Enums.
+   * Generates the complete TypeScript code for a DTO class.
    *
-   * @param models - The list of models to generate.
+   * @param model The Intermediate Representation of the DTO.
+   * @param cliVersion The current version of the CLI.
+   * @param specVersion The OpenAPI specification version.
+   * @returns The generated TypeScript source code.
    */
-  async writeAll(models: IrModel[]): Promise<void> {
-    // Keep a reference for downstream imports (union/intersection, parent types, enums)
-    this.allModels = models;
+  public async write(
+    model: IrModel,
+    allModels: IrModel[],
+    inheritedProperties: Set<string>,
+    cliVersion: string,
+    specTitle: string,
+    specVersion: string,
+  ): Promise<IAstPrintedFile> {
+    const classValidatorImports = new Set<string>();
+    const classTransformerImports = new Set<string>();
+    const customTypeImports = new Set<string>();
+    const modelRegistry = new Map(allModels.map((m) => [m.name, m]));
 
-    for (const model of models) {
-      if (model.isEnum) {
-        this.writeEnum(model);
-      } else {
-        this.writeDto(model);
+    let mainNode: ts.ClassDeclaration | ts.EnumDeclaration;
+
+    if (this.isPureOneOfModel(model)) {
+      return this.buildTypeAlias(model, cliVersion, specTitle, specVersion);
+    }
+
+    if (model.isEnum) {
+      mainNode = this.buildEnumNode(model);
+    } else {
+      mainNode = this.buildClassNode(
+        model,
+        inheritedProperties,
+        customTypeImports,
+        classValidatorImports,
+        classTransformerImports,
+      );
+    }
+
+    mainNode = this.commentModifier.addJSDoc(mainNode, model.description);
+
+    const importNodes: ts.ImportDeclaration[] = [];
+
+    if (classValidatorImports.size > 0) {
+      importNodes.push(
+        this.importBuilder.createNamedImport('class-validator', Array.from(classValidatorImports)),
+      );
+    }
+
+    if (classTransformerImports.size > 0) {
+      importNodes.push(
+        this.importBuilder.createNamedImport(
+          'class-transformer',
+          Array.from(classTransformerImports),
+        ),
+      );
+    }
+
+    // TODO: This logic is duplicated in the service writer. Refactor to a shared utility that both writers can use to determine necessary imports based on used types.
+    if (customTypeImports.size > 0) {
+      const sortedCustomImports = Array.from(customTypeImports).sort();
+
+      for (const customType of sortedCustomImports) {
+        if (customType !== model.name) {
+          const referencedModel = modelRegistry.get(customType);
+          if (!referencedModel) continue;
+
+          const importPath = this.formatDtoImportPath(referencedModel);
+          importNodes.push(this.importBuilder.createNamedImport(importPath, [customType]));
+        }
       }
     }
+
+    const emptyLineNode = ts.factory.createIdentifier('\n');
+    const fileNodes = [...importNodes, emptyLineNode, mainNode];
+    const nodesWithHeader = this.headerGenerator.addHeader(
+      fileNodes,
+      cliVersion,
+      specTitle,
+      specVersion,
+    );
+
+    const fileExtension = model.isEnum ? 'enum.ts' : 'dto.ts';
+    return this.printer.print(nodesWithHeader, `${model.fileName}.${fileExtension}`);
   }
 
-  /**
-   * Writes a single DTO class or OneOf type alias based on the model shape.
-   * Pure OneOf models (discriminator + subTypes, no own properties or base type) are rendered as union type aliases.
-   * Hybrid models emit classes with properties, inheritance, and validation decorators.
-   *
-   * @param model The IR model to emit.
-   * @returns void
-   */
-  private writeDto(model: IrModel): void {
-    const fileName = `${model.fileName}.dto.ts`;
-    const sourceFile = this.project.createSourceFile(`${this.outputDir}/dto/${fileName}`, '', {
-      overwrite: true,
-    });
-
-    // Handle "pure" OneOf models (e.g. types that are just a union of other types with a discriminator)
-    // In this case, we generate a Type Alias instead of a Class.
-    if (this.isPureOneOfModel(model)) {
-      this.writeTypeAlias(sourceFile, model);
-      return;
-    }
-
-    // Add necessary imports
-    ImportHelper.addDtoImports(sourceFile, model, this.allModels);
-
-    // Create the Class
-    const classDecl = sourceFile.addClass({
-      name: model.name,
-      isExported: true,
-      docs: model.description ? [{ description: model.description }] : undefined,
-    });
-
-    // Handle Inheritance
-    if (model.extends) {
-      classDecl.setExtends(model.extends);
-    }
-
-    // Add Properties
-    for (const prop of model.properties) {
-      this.addProperty(classDecl, prop, sourceFile);
-    }
-
-    // Add header and format the file
-    FileHeaderHelper.addHeader(sourceFile, this.specTitle, this.specVersion);
-    sourceFile.formatText();
-  }
-
-  /**
-   * Determines whether the model qualifies as a pure OneOf union.
-   * A model qualifies when it defines a discriminator and subTypes but has no own properties and no base class.
-   *
-   * @param model The IR model under evaluation.
-   * @returns True when the generator should emit a union type alias instead of a class.
-   */
   private isPureOneOfModel(model: IrModel): boolean {
     return (
       model.discriminator !== undefined &&
@@ -120,235 +123,352 @@ export class DtoWriter {
     );
   }
 
-  /**
-   * Writes a type alias for a pure OneOf model (union of subTypes).
-   *
-   * @param sourceFile The target source file where the alias is emitted.
-   * @param model The IR model describing the union members.
-   * @returns void
-   */
-  private writeTypeAlias(sourceFile: SourceFile, model: IrModel): void {
-    if (!model.subTypes || model.subTypes.length === 0) return;
-
-    // Add imports for union types
-    const typeNames = model.subTypes.map((st) => st.name);
-    for (const typeName of typeNames) {
-      const refModel = this.allModels.find((m) => m.name === typeName);
-      // Fallback to kebab-case conversion if model not found in registry
-      const refFileName = refModel ? refModel.fileName : toKebabCase(typeName);
-
-      sourceFile.addImportDeclaration({
-        moduleSpecifier: `./${refFileName}.dto`,
-        namedImports: [typeName],
-      });
-    }
-
-    // Create Type Alias
-    const unionType = typeNames.join(' | ');
-    sourceFile.addTypeAlias({
-      name: model.name,
-      type: unionType,
-      isExported: true,
-      docs: model.description ? [{ description: model.description }] : undefined,
-    });
-
-    FileHeaderHelper.addHeader(sourceFile, this.specTitle, this.specVersion);
-    sourceFile.formatText();
-  }
-
-  /**
-   * Adds a property to the DTO class with correct type and decorators.
-   */
-  private addProperty(
-    classDecl: ClassDeclaration,
-    prop: IrProperty,
-    _sourceFile: SourceFile,
-  ): void {
-    const propertyDecl = classDecl.addProperty({
-      name: prop.name,
-      type: TypeHelper.irTypeToString(prop.type),
-      hasQuestionToken: prop.isOptional,
-      isReadonly: prop.isReadonly,
-      scope: Scope.Public,
-      docs: prop.description ? [{ description: prop.description }] : undefined,
-      hasExclamationToken: !prop.isOptional, // Strict Property Initialization
-    });
-
-    // Add structural decorators
-    if (prop.isOptional) {
-      propertyDecl.addDecorator({
-        name: 'IsOptional',
-        arguments: [],
-      });
-    } else {
-      propertyDecl.addDecorator({
-        name: 'IsNotEmpty',
-        arguments: [],
-      });
-    }
-
-    if (prop.discriminator) {
-      // NOTE: Consider adding { each: true } if it's an array for stricter validation
-      propertyDecl.addDecorator({
-        name: 'ValidateNested',
-        arguments: prop.type.isArray ? ['{ each: true }'] : [],
-      });
-    }
-
-    // Add automatic type-based decorators (e.g. IsString, IsInt, Type)
-    this.addTypeBasedDecorators(propertyDecl, prop);
-
-    // Add validation decorators defined in schema (e.g. Min, Max, Regex)
-    DecoratorHelper.addValidators(propertyDecl, prop.validators);
-  }
-
-  /**
-   * Infers and adds validation decorators based on the property type.
-   */
-  private addTypeBasedDecorators(prop: PropertyDeclaration, irProp: IrProperty): void {
-    const typeString = TypeHelper.irTypeToString(irProp.type);
-    const hasUrlValidator = irProp.validators.some((v) => v.type === 'IS_URL');
-    const hasDateValidator = irProp.validators.some((v) => v.type === 'IS_DATE');
-
-    // Array Handling
-    if (irProp.type.isArray) {
-      prop.addDecorator({
-        name: 'IsArray',
-        arguments: [],
-      });
-    }
-
-    // Date Handling (Transformation)
-    if (hasDateValidator) {
-      prop.addDecorator({
-        name: 'Type',
-        arguments: ['() => Date'],
-      });
-      return;
-    }
-
-    // Discriminator Handling (Polymorphism)
-    if (irProp.discriminator) {
-      this.addDiscriminatorDecorator(prop, irProp);
-      return;
-    }
-
-    // String Handling
-    if (typeString === 'string') {
-      // Skip if it was an array (already handled by IsArray) to avoid IsString on string[]
-      if (irProp.type.isArray) return;
-
-      if (!hasUrlValidator) {
-        prop.addDecorator({
-          name: 'IsString',
-          arguments: [],
-        });
-      }
-      return;
-    }
-
-    // Number Handling
-    if (typeString === 'number') {
-      if (irProp.type.isArray) return; // Skip IsNumber for number[]
-
-      prop.addDecorator({
-        name: 'IsNumber',
-        arguments: [],
-      });
-      return;
-    }
-
-    // Boolean Handling
-    if (typeString === 'boolean') {
-      if (irProp.type.isArray) return; // Skip IsBoolean for boolean[]
-
-      prop.addDecorator({
-        name: 'IsBoolean',
-        arguments: [],
-      });
-      return;
-    }
-
-    // Enum-like Union Handling (e.g., 'active' | 'inactive')
-    if (
-      Array.isArray(irProp.type.rawType) &&
-      irProp.type.composition === 'union' &&
-      irProp.type.isPrimitive
-    ) {
-      // rawType is like ["available", "pending", "sold"]
-      // Wrap values in single quotes for the @IsIn array
-      const values = irProp.type.rawType.map((v) => `'${v}'`).join(', ');
-      prop.addDecorator({
-        name: 'IsIn',
-        arguments: [`[${values}]`],
-      });
-      return;
-    }
-  }
-
-  /**
-   * Adds `@Type` decorator with discriminator configuration for polymorphic types.
-   */
-  private addDiscriminatorDecorator(prop: PropertyDeclaration, irProp: IrProperty): void {
-    const discriminator = irProp.discriminator;
-    if (!discriminator) return;
-
-    // Determine base class (usually the first one in the union)
-    const baseTypeName = Array.isArray(irProp.type.rawType)
-      ? irProp.type.rawType[0]
-      : irProp.type.rawType;
-
-    // Build subTypes array for class-transformer
-    const subTypes = Object.entries(discriminator.mapping).map(([value, className]) => {
-      return `{ value: ${className}, name: '${value}' }`;
-    });
-
-    const discriminatorConfig = `{
-      keepDiscriminatorProperty: true,
-      discriminator: {
-        property: '${discriminator.propertyName}',
-        subTypes: [${subTypes.join(', ')}]
-      }
-    }`;
-
-    prop.addDecorator({
-      name: 'Type',
-      arguments: [`() => ${baseTypeName}`, discriminatorConfig],
-    });
-  }
-
-  /**
-   * Writes an Enum file.
-   */
-  private writeEnum(model: IrModel): void {
-    const fileName = `${model.fileName}.enum.ts`;
-    const sourceFile = this.project.createSourceFile(`${this.outputDir}/dto/${fileName}`, '', {
-      overwrite: true,
-    });
-
-    sourceFile.addEnum({
-      name: model.name,
-      isExported: true,
-      docs: model.description ? [{ description: model.description }] : undefined,
-      members:
-        model.enumValues?.map((val) => ({
-          name: this.sanitizeEnumMemberName(val),
-          value: val,
-        })) || [],
-    });
-
-    FileHeaderHelper.addHeader(sourceFile, this.specTitle, this.specVersion);
-    sourceFile.formatText();
-  }
-
-  /**
-   * Sanitizes an enum member name to be uppercase and underscored.
-   * Example: "active-user" -> "ACTIVE_USER"
-   */
   private sanitizeEnumMemberName(value: string): string {
     return value
       .toUpperCase()
       .replace(/[^A-Z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '');
+  }
+
+  /**
+   * Builds an Enum declaration AST node.
+   */
+  private buildEnumNode(model: IrModel): ts.EnumDeclaration {
+    const enumMembers = (model.enumValues || []).map((val) =>
+      ts.factory.createEnumMember(
+        ts.factory.createIdentifier(this.sanitizeEnumMemberName(val)),
+        ts.factory.createStringLiteral(val),
+      ),
+    );
+
+    return ts.factory.createEnumDeclaration(
+      [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
+      ts.factory.createIdentifier(model.name),
+      enumMembers,
+    );
+  }
+
+  /**
+   * Builds a Class declaration AST node, including heritage clauses (extends).
+   */
+  private buildClassNode(
+    model: IrModel,
+    inheritedProperties: Set<string>,
+    customTypeImports: Set<string>,
+    classValidatorImports: Set<string>,
+    classTransformerImports: Set<string>,
+  ): ts.ClassDeclaration {
+    const astProperties = model.properties.map((prop) => {
+      const typeNode = this.mapIrType(prop.type, customTypeImports);
+      const structuralDecorators = this.buildStructuralDecorators(
+        prop,
+        classValidatorImports,
+        classTransformerImports,
+      );
+      const validatorDecorators = this.mapValidators(prop.validators, classValidatorImports);
+
+      // `@IsOptional` is emitted before the structural decorators so it appears
+      // first in the generated output (class-validator reads it as a guard).
+      let isOptionalDecorator: ts.Decorator[] = [];
+      if (prop.isOptional) {
+        isOptionalDecorator = [this.decoratorBuilder.create('IsOptional')];
+        classValidatorImports.add('IsOptional');
+      }
+
+      const decorators = [...isOptionalDecorator, ...structuralDecorators, ...validatorDecorators];
+
+      if (prop.discriminator) {
+        decorators.push(this.buildTypeDiscriminatorDecorator(prop, customTypeImports));
+        classTransformerImports.add('Type');
+      }
+
+      return this.propertyBuilder.create(prop.name, typeNode, {
+        isOptional: prop.isOptional,
+        isReadonly: prop.isReadonly,
+        isRedeclared: inheritedProperties.has(prop.name),
+        description: prop.description,
+        decorators: decorators,
+      });
+    });
+
+    let heritageClauses: ts.HeritageClause[] | undefined = undefined;
+    if (model.extends) {
+      heritageClauses = [
+        ts.factory.createHeritageClause(ts.SyntaxKind.ExtendsKeyword, [
+          ts.factory.createExpressionWithTypeArguments(
+            ts.factory.createIdentifier(model.extends),
+            undefined,
+          ),
+        ]),
+      ];
+      customTypeImports.add(model.extends);
+    }
+
+    return ts.factory.createClassDeclaration(
+      [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
+      ts.factory.createIdentifier(model.name),
+      undefined,
+      heritageClauses,
+      astProperties,
+    );
+  }
+
+  private buildStructuralDecorators(
+    prop: IrProperty,
+    classValidatorImports: Set<string>,
+    classTransformerImports: Set<string>,
+  ): ts.Decorator[] {
+    const decorators: ts.Decorator[] = [];
+    const rawType = Array.isArray(prop.type.rawType) ? prop.type.rawType[0] : prop.type.rawType;
+    const hasDateValidator = prop.validators.some((v) => v.type === 'IS_DATE');
+
+    // 1. Required vs Optional
+    if (!prop.isOptional) {
+      decorators.push(this.decoratorBuilder.create('IsNotEmpty'));
+      classValidatorImports.add('IsNotEmpty');
+    }
+
+    // 2. Array
+    if (prop.type.isArray) {
+      decorators.push(this.decoratorBuilder.create('IsArray'));
+      classValidatorImports.add('IsArray');
+      return decorators; // `@IsArray` + the required/optional guard above is enough for arrays.
+    }
+
+    // 3. Date transformation (class-transformer, non class-validator)
+    if (hasDateValidator || rawType === 'Date') {
+      decorators.push(
+        this.decoratorBuilder.create('Type', [
+          ts.factory.createArrowFunction(
+            undefined,
+            undefined,
+            [],
+            undefined,
+            ts.factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+            ts.factory.createIdentifier('Date'),
+          ),
+        ]),
+      );
+      classTransformerImports.add('Type');
+      return decorators; // @Type gestisce la trasformazione, niente IsString/IsNumber
+    }
+
+    if (prop.discriminator) {
+      decorators.push(this.decoratorBuilder.create('ValidateNested'));
+      classValidatorImports.add('ValidateNested');
+    }
+
+    const hasUrlValidator = prop.validators.some((v) => v.type === 'IS_URL');
+
+    // 4. Primitive type-based decorators
+    if (!prop.discriminator) {
+      if (rawType === 'string' && !hasUrlValidator) {
+        decorators.push(this.decoratorBuilder.create('IsString'));
+        classValidatorImports.add('IsString');
+      } else if (rawType === 'number') {
+        decorators.push(this.decoratorBuilder.create('IsNumber'));
+        classValidatorImports.add('IsNumber');
+      } else if (rawType === 'boolean') {
+        decorators.push(this.decoratorBuilder.create('IsBoolean'));
+        classValidatorImports.add('IsBoolean');
+      }
+    }
+
+    // 5. Inline enum union → @IsIn(['val1', 'val2'])
+    if (
+      Array.isArray(prop.type.rawType) &&
+      prop.type.composition === 'union' &&
+      prop.type.isPrimitive
+    ) {
+      const elements = prop.type.rawType.map((v) => ts.factory.createStringLiteral(v));
+      decorators.push(
+        this.decoratorBuilder.create('IsIn', [ts.factory.createArrayLiteralExpression(elements)]),
+      );
+      classValidatorImports.add('IsIn');
+    }
+
+    return decorators;
+  }
+
+  private buildTypeDiscriminatorDecorator(
+    prop: IrProperty,
+    customImports: Set<string>,
+  ): ts.Decorator {
+    const disc = prop.discriminator!;
+
+    // 1. Arrow Function: () => BaseClass
+    const baseTypeName = Array.isArray(prop.type.rawType)
+      ? prop.type.rawType[0]
+      : prop.type.rawType;
+    const arrowFunc = this.expressionBuilder.createArrowFunctionReturningIdentifier(baseTypeName);
+
+    // 2. Map each discriminator subtype to an object literal.
+    const subTypesElements = Object.entries(disc.mapping).map(([value, className]) => {
+      customImports.add(className);
+
+      return this.expressionBuilder.createObjectLiteral({
+        value: this.expressionBuilder.createIdentifier(className),
+        name: this.expressionBuilder.createStringLiteral(value),
+      });
+    });
+
+    // 3. Nested configuration object passed to `@Type(...)`.
+    const configObj = this.expressionBuilder.createObjectLiteral({
+      keepDiscriminatorProperty: this.expressionBuilder.createBooleanLiteral(true),
+      discriminator: this.expressionBuilder.createObjectLiteral({
+        property: this.expressionBuilder.createStringLiteral(disc.propertyName),
+        subTypes: this.expressionBuilder.createArrayLiteral(subTypesElements),
+      }),
+    });
+
+    return this.decoratorBuilder.create('Type', [arrowFunc, configObj]);
+  }
+
+  private async buildTypeAlias(
+    model: IrModel,
+    cliVersion: string,
+    specTitle: string,
+    specVersion: string,
+  ): Promise<IAstPrintedFile> {
+    const subTypes = model.subTypes!;
+
+    // One import per subtype
+    const importNodes: ts.ImportDeclaration[] = subTypes.map((st) =>
+      this.importBuilder.createNamedImport(`./${toKebabCase(st.name)}.dto`, [st.name]),
+    );
+
+    // Union type node: Cat | Dog | Bird
+    const unionNode = this.typeBuilder.createUnion(
+      subTypes.map((st) => this.typeBuilder.createReference(st.name)),
+    );
+
+    let aliasNode = this.declarationBuilder.createTypeAlias(model.name, unionNode);
+    aliasNode = this.commentModifier.addJSDoc(aliasNode, model.description);
+
+    const emptyLineNode = ts.factory.createIdentifier('\n');
+    const fileNodes = [...importNodes, emptyLineNode, aliasNode];
+    const nodesWithHeader = this.headerGenerator.addHeader(
+      fileNodes,
+      cliVersion,
+      specTitle,
+      specVersion,
+    );
+
+    return this.printer.print(nodesWithHeader, `${model.fileName}.dto.ts`);
+  }
+
+  /**
+   * Converts a PascalCase class name to a kebab-case import path.
+   * @example 'AccountBalanceLimitsData' -> './account-balance-limits-data.dto'
+   */
+  private formatDtoImportPath(referencedModel: IrModel): string {
+    const suffix = referencedModel.isEnum ? '.enum' : '.dto';
+    return `./${referencedModel.fileName}${suffix}`;
+  }
+
+  /**
+   * Maps an IrType to the equivalent AST nodes.
+   */
+  private mapIrType(irType: IrType, customImports: Set<string>): ts.TypeNode {
+    if (Array.isArray(irType.rawType)) {
+      const memberNodes = irType.rawType.map((t) => {
+        if (irType.isPrimitive) {
+          return ts.factory.createLiteralTypeNode(ts.factory.createStringLiteral(t));
+        } else {
+          customImports.add(t);
+          return this.typeBuilder.createReference(t);
+        }
+      });
+
+      const composedNode =
+        irType.composition === 'intersection'
+          ? ts.factory.createIntersectionTypeNode(memberNodes)
+          : this.typeBuilder.createUnion(memberNodes);
+
+      return irType.isArray ? this.typeBuilder.createArray(composedNode) : composedNode;
+    }
+
+    const typeName = irType.rawType;
+
+    let baseTypeNode: ts.TypeNode;
+
+    if (irType.isPrimitive) {
+      baseTypeNode = this.typeBuilder.createPrimitive(
+        isPrimitiveTypeName(typeName) ? typeName : 'any',
+      );
+    } else if (typeName.startsWith('Record<')) {
+      baseTypeNode = this.buildRecordTypeNode(typeName, customImports);
+    } else {
+      baseTypeNode = this.typeBuilder.createReference(typeName);
+      if (TypeHelper.needsImport(irType)) {
+        customImports.add(typeName);
+      }
+    }
+
+    if (irType.isArray) {
+      return this.typeBuilder.createArray(baseTypeNode);
+    }
+
+    return baseTypeNode;
+  }
+
+  /**
+   * Builds a Record<string, V> type node.
+   * Only the value type V is registered as a custom import when it is not primitive.
+   *
+   * @param rawType The full Record type string, e.g. 'Record<string, UserRecords>'.
+   * @param customImports The import registry to update with the value type, if needed.
+   * @returns A TypeReferenceNode representing Record<string, V>.
+   */
+  private buildRecordTypeNode(rawType: string, customImports: Set<string>): ts.TypeReferenceNode {
+    const valueTypeName = TypeHelper.extractRecordValueType(rawType);
+
+    let valueNode: ts.TypeNode;
+    if (valueTypeName && !isPrimitiveTypeName(valueTypeName)) {
+      customImports.add(valueTypeName);
+      valueNode = this.typeBuilder.createReference(valueTypeName);
+    } else {
+      const primitive = isPrimitiveTypeName(valueTypeName ?? 'any')
+        ? (valueTypeName as PrimitiveTypeName)
+        : 'any';
+      valueNode = this.typeBuilder.createPrimitive(primitive);
+    }
+
+    return this.typeBuilder.createReference('Record', [
+      this.typeBuilder.createPrimitive('string'),
+      valueNode,
+    ]);
+  }
+
+  /**
+   * Convert the IrValidators into ts.Decorator. Updates the importsSet with any class-validator decorators used.
+   *
+   * @param validators The array of IrValidators to convert.
+   * @param importsSet A Set to track which class-validator decorators need to be imported.
+   * @returns An array of ts.Decorator nodes corresponding to the provided validators.
+   */
+  private mapValidators(validators: IrValidator[], importsSet: Set<string>): ts.Decorator[] {
+    return validators.flatMap((val) => {
+      const decoratorName = VALIDATOR_DECORATOR_MAP[val.type];
+      if (!decoratorName) {
+        Logger.warn(`Unsupported validator type: ${val.type}`);
+        return [];
+      }
+
+      importsSet.add(decoratorName);
+
+      const args: ts.Expression[] = [];
+      if (val.params !== undefined) {
+        if (typeof val.params === 'number') {
+          args.push(ts.factory.createNumericLiteral(val.params));
+        } else if (val.type === 'MATCHES') {
+          args.push(ts.factory.createRegularExpressionLiteral(`/${val.params}/`));
+        } else if (typeof val.params === 'string') {
+          args.push(ts.factory.createStringLiteral(val.params));
+        }
+      }
+
+      return [this.decoratorBuilder.create(decoratorName, args)];
+    });
   }
 }

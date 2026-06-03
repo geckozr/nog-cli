@@ -14,6 +14,7 @@ test-output/
 
 # Configuration
 tsconfig.json
+tsconfig.build.json
 vitest.config.ts
 eslint.config.mjs
 .prettierrc

@@ -175,7 +175,7 @@ External references (`$ref`) are automatically resolved and bundled.
 
 ## Architecture
 
-Refer to [DOCUMENTATION.md](DOCUMENTATION.md) for detailed architecture overview, design decisions, and internal representation structures.
+Refer to [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) for detailed architecture overview, design decisions, and internal representation structures. See [docs/USAGE.md](docs/USAGE.md) for a guide to consuming the generated SDK.
 
 ## Contributing
 

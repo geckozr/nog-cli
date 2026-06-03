@@ -5,10 +5,10 @@
 1. [High-Level Architecture](#high-level-architecture)
 2. [Data Flow Pipeline](#data-flow-pipeline)
 3. [Core Concepts](#core-concepts)
-4. [Directory Structure](#directory-structure)
-5. [Design Decisions](#design-decisions)
-6. [Generated Code Structure](#generated-code-structure)
-7. [Development Patterns](#development-patterns)
+4. [Design Decisions](#design-decisions)
+5. [Directory Structure](#directory-structure)
+6. [Development Patterns](#development-patterns)
+7. [Further Reading](#further-reading)
 
 ## High-Level Architecture
 
@@ -21,7 +21,7 @@ OpenAPI Spec (Input)
         ↓
  Internal Representation (IR) - Normalize to framework-agnostic structure
         ↓
-   [Generator]       - Emit TypeScript code via ts-morph AST
+   [Generator]       - Emit TypeScript code via ts.factory + Prettier
         ↓
 Generated NestJS Module (Output)
 ```
@@ -39,7 +39,7 @@ This architecture provides several benefits:
 
 - **Parser**: MUST NOT perform business logic transformations
 - **IR**: MUST contain all data needed for generation (Generator NEVER accesses raw OpenAPI)
-- **Generator**: MUST use ts-morph AST manipulation (NO string concatenation for code)
+- **Generator**: MUST build TypeScript ASTs through `ts.factory` (NO string concatenation for code)
 
 ## Data Flow Pipeline
 
@@ -91,14 +91,19 @@ The `OpenApiConverter` resolves circular dependencies using a two-pass approach:
 
 **Location:** `src/core/generator/`
 
-The generator consumes the IR and emits TypeScript code using the `ts-morph` library (Abstract Syntax Tree manipulation).
+The generator consumes the IR and emits TypeScript code by building ASTs with the official `typescript` Compiler API (`ts.factory`), printing them with `ts.Printer`, and formatting the result with `prettier`.
 
 #### Writer Classes
 
-- **DtoWriter**: Emits DTO classes and Enums.
-- **ServiceWriter**: Emits NestJS Service classes.
-- **ModuleWriter**: Emits the primary NestJS Module that wires services.
+- **DtoWriter**: Emits DTO classes, enums, and pure-union type aliases.
+- **ServiceWriter**: Emits NestJS Service classes (dual-method: Observable + Promise).
+- **ApiTypesWriter**: Emits the shared `ApiModuleConfig` / `ApiModuleAsyncConfig` interfaces.
+- **ApiConfigurationWriter**: Emits the injectable `ApiConfiguration` token as a thin config holder: three getters (`baseUrl`, `headers`, `httpOptions`) backed by the `@Inject(API_CONFIG)`-resolved record. URL/query/header shaping does not live here — it is centralised in `RequestBuilder` so the config class stays stateless and free of HTTP concerns.
+- **RequestBuilderWriter**: Emits `request-builder.service.ts` — a stateless `@Injectable()` helper with three public methods (`buildUrl`, `buildQuery`, `buildHeaders`) and an exported `ParamStyle = 'csv' | 'space' | 'pipe' | 'deep'` union for the non-default OpenAPI 3 serialization styles. `buildUrl` interpolates `{name}` placeholders with `encodeURIComponent` (RFC 3986 path-segment encoding); missing keys are left as literal placeholders and `null`/`undefined` collapse to empty strings (permissive contract). `buildQuery` picks listed keys from `params?.query` with `undefined → omit`, `null → ''` (clear-semantic, matches the "wipe a field" convention common in REST APIs) and applies the styles map for `csv`/`space`/`pipe`/`deep` (default `form+explode:true` passes through to axios). `buildHeaders` composes `this.config.headers` with per-call `params?.headers` extras and stringifies values; Accept / Content-Type assignments are emitted after the call so they always override consumer input.
+- **ApiModuleWriter**: Emits the NestJS `ApiModule` with `forRoot` / `forRootAsync` factory methods. The configuration providers (`API_CONFIG`, `ApiConfiguration`, `RequestBuilder`) are declared directly on the module — no sub-module indirection — so each `forRoot[Async]` call owns its own provider scope and two distinct registrations stay isolated under NestJS v11 reference-equality dedup. `forRootAsync` builds the async providers once via the inline `createAsyncProviders` helper and shares the same array reference between `module.providers` and `HttpModule.registerAsync({ extraProviders })`; that shared reference is what makes NestJS materialise the `API_CONFIG` provider once per registration, so the consumer-supplied `useFactory` fires exactly once.
 - **IndexWriter**: Emits barrel export files (`index.ts`).
+
+Each writer is composed from small, reusable builders under `src/core/generator/writers/core/` (`AstPrinter`, `DeclarationBuilder`, `DecoratorBuilder`, `ImportBuilder`, `ParameterBuilder`, `PropertyBuilder`, `ServiceMethodBuilder`, `ServiceStatementBuilder`, `TypeBuilder`, `ExpressionBuilder`, `HeaderGenerator`, `CommentModifier`) which are injected through the constructor.
 
 **Key File:** `src/core/generator/engine.ts`
 
@@ -298,14 +303,15 @@ Validation rules are automatically extracted from OpenAPI schema constraints:
 
 ## Design Decisions
 
-### Why ts-morph for Code Generation?
+### Why ts.factory + Prettier for Code Generation?
 
-We use `ts-morph` (AST manipulation) instead of string templates because:
+We build ASTs directly with the TypeScript Compiler API (`ts.factory`), print them with `ts.Printer`, and format the output with `prettier`, instead of using string templates because:
 
-- **Correctness:** Impossible to emit syntactically invalid code.
-- **Formatting:** Automatic indentation, semicolons, and line breaks.
-- **Maintenance:** Changes to code structure are declarative, not brittle.
-- **Testing:** Emitted code can be validated by loading into a `Project` and inspecting the AST.
+- **Correctness:** Impossible to emit syntactically invalid code — the AST encodes the grammar.
+- **Formatting:** Prettier handles indentation, quotes, semicolons, and line breaks uniformly.
+- **Zero adapter overhead:** `ts.factory` is shipped by the `typescript` package itself — no extra runtime dependency.
+- **Maintenance:** Changes are declarative (small, focused builders under `writers/core/`).
+- **Testing:** Emitted code can be re-parsed with `ts.createSourceFile` and inspected via the visitor API (no separate AST library needed).
 
 ### Why Two-Pass Circular Dependency Resolution?
 
@@ -340,25 +346,39 @@ src/
 │   │   ├── spec.loader.ts       # I/O: FileSystem & HTTP loading
 │   │   └── openapi.parser.ts    # Parsing & Bundle via swagger-parser
 │   ├── ir/               # [Layer 2] Intermediate Representation
-│   │   ├── interfaces/
-│   │   │   └── models.ts        # TYPES ONLY: Defines IrModel, IrService
+│   │   ├── interfaces/          # TYPES ONLY: IR types (IrModel, IrService, …)
+│   │   │   ├── models.ts
+│   │   │   ├── services.ts
+│   │   │   └── validator-map.ts # Maps constraints to class-validator
 │   │   ├── analyzer/            # Helpers for type mapping & analysis
 │   │   │   ├── type.mapper.ts   # Maps OpenAPI types to IR types
-│   │   │   ├── validator.map.ts # Maps constraints to class-validator
 │   │   │   └── schema.merger.ts # Handles allOf, oneOf, anyOf
 │   │   └── openapi.converter.ts # LOGIC: OpenAPI -> IR Transformer
-│   └── generator/        # [Layer 3] Code Emission (ts-morph)
+│   └── generator/        # [Layer 3] Code Emission (ts.factory + Prettier)
 │       ├── engine.ts            # Main orchestrator (FileSystem writes)
-│       ├── helpers/             # Reusable code generation utilities
-│       │   ├── type.helper.ts
-│       │   ├── import.helper.ts
-│       │   ├── decorator.helper.ts
-│       │   └── file-header.helper.ts
-│       └── writers/             # Logic for writing specific file types
-│           ├── dto.writer.ts    # Writes *.dto.ts
-│           ├── service.writer.ts # Writes *.service.ts
-│           ├── module.writer.ts  # Writes *.module.ts
-│           └── index.writer.ts   # Writes index.ts
+│       ├── helpers/
+│       │   └── type.helper.ts   # Shared naming / type-name utilities
+│       └── writers/
+│           ├── core/            # Reusable AST builders (DI-friendly)
+│           │   ├── ast-printer.ts
+│           │   ├── comment-modifier.ts
+│           │   ├── declaration-builder.ts
+│           │   ├── decorator-builder.ts
+│           │   ├── expression-builder.ts
+│           │   ├── header-generator.ts
+│           │   ├── import-builder.ts
+│           │   ├── parameter-builder.ts
+│           │   ├── property-builder.ts
+│           │   ├── service-method-builder.ts
+│           │   ├── service-statement-builder.ts
+│           │   └── type-builder.ts
+│           ├── dto.writer.ts          # Writes *.dto.ts (+ enums + pure unions)
+│           ├── service.writer.ts      # Writes *.service.ts
+│           ├── api-module.writer.ts   # Writes api.module.ts
+│           ├── api-configuration.writer.ts # Writes api.configuration.ts
+│           ├── request-builder.writer.ts   # Writes request-builder.service.ts
+│           ├── api-types.writer.ts    # Writes api.types.ts
+│           └── index.writer.ts        # Writes index.ts barrels
 └── utils/                # Shared utilities (Logger, Naming, FS)
     ├── logger.ts
     ├── naming.ts
@@ -369,7 +389,6 @@ test/
 │   └── generator.e2e-spec.ts     # End-to-end test suite
 ├── fixtures/
 │   ├── petstore.json             # Standard test spec
-│   ├── cyclos.json               # Real-world complex spec
 │   └── complex.json              # Edge case spec
 └── units/
     ├── parser/                   # Parser unit tests
@@ -391,7 +410,7 @@ test/
 
 1. **Update IR:** Add `'PATTERN'` to the `IrValidator` union type in `src/core/ir/interfaces/models.ts`.
 2. **Update Analyzer:** In `src/core/ir/analyzer/type.mapper.ts`, extract the `pattern` field from OpenAPI schemas and add a `PATTERN` validator.
-3. **Update Generator:** In `src/core/generator/writers/dto.writer.ts`, read the `PATTERN` validator and apply the `@Matches()` decorator using `ts-morph`.
+3. **Update Generator:** In `src/core/generator/writers/dto.writer.ts`, read the `PATTERN` validator and emit the `@Matches()` decorator via the `DecoratorBuilder` (which wraps `ts.factory.createDecorator`).
 
 ### Testing Strategy
 
@@ -413,5 +432,6 @@ test/
 
 - [OpenAPI 3.0 Specification](https://spec.openapis.org/oas/v3.0.3)
 - [NestJS Documentation](https://docs.nestjs.com/)
-- [ts-morph Documentation](https://ts-morph.readthedocs.io/)
+- [TypeScript Compiler API (`ts.factory`)](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+- [Prettier Documentation](https://prettier.io/docs/en/)
 - [class-validator Documentation](https://github.com/typestack/class-validator)

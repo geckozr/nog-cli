@@ -67,7 +67,8 @@ export class TypeHelper {
     }
 
     // 3. Handle generic Records (starts with Record<)
-    // The Record itself is global, the value type inside might need import (handled by ImportHelper)
+    // The Record itself is global; the value type inside is resolved later when imports
+    // are computed by the writer's ImportBuilder.
     if (typeof raw === 'string' && raw.startsWith('Record<')) {
       return false;
     }
