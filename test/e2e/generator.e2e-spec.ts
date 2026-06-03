@@ -120,7 +120,11 @@ const hasMethodDeclaration = (sourceFile: ts.SourceFile): boolean => {
 };
 
 beforeAll(() => {
-  fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  // Only ensure the shared parent exists; do NOT rmSync it. Each it() below
+  // and the nested cataas describe already clean their own subdirectory.
+  // Wiping the parent here races sibling E2E suites (request-builder-runtime,
+  // sdk-compile, api-module-multi-config) that Vitest runs in parallel forks
+  // and that write into their own subdirectories under test-output/.
   fs.mkdirSync(TEMP_DIR, { recursive: true });
 });
 
