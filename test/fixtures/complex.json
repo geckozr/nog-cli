@@ -853,6 +853,40 @@
             "description": "OSM-style key that must stay verbatim on the wire."
           }
         }
+      },
+      "NestedInlineReport": {
+        "type": "object",
+        "description": "Inline object types that nest arrays, anonymous enums and $refs.",
+        "properties": {
+          "summary": {
+            "type": "object",
+            "properties": {
+              "state": { "type": "string", "enum": ["NEW", "DONE"] },
+              "author": { "$ref": "#/components/schemas/User" },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": { "type": "string" },
+                    "post": { "$ref": "#/components/schemas/Post" }
+                  }
+                }
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "commentsByKey": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/Comment" }
+            }
+          }
+        }
       }
     }
   }

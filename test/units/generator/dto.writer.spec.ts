@@ -582,6 +582,65 @@ describe('DtoWriter', () => {
     expect(output.generatedCode).toContain("public status!: 'ACTIVE' | 'PENDING';");
   });
 
+  it('should import the element type of an array-valued Record and the refs of an inline object', async () => {
+    const mockModel: IrModel = {
+      name: 'BinaryValuesDto',
+      fileName: 'binary-values-dto',
+      isEnum: false,
+      properties: [
+        {
+          name: 'fileValues',
+          type: { rawType: 'Record<string, UserDto>', isArray: false, isPrimitive: false },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+        {
+          name: 'imageValues',
+          type: { rawType: 'Record<string, ConfigA[]>', isArray: false, isPrimitive: false },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+        {
+          name: 'document',
+          // An inline object literal carries its nested refs in referencedTypes.
+          type: {
+            rawType: '{ fileInfo?: ConfigB; name?: string }',
+            isArray: false,
+            isPrimitive: false,
+            referencedTypes: ['ConfigB'],
+          },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+      ],
+    };
+
+    const mockedModels: IrModel[] = [
+      { name: 'UserDto', fileName: 'user-dto', isEnum: false, properties: [] },
+      { name: 'ConfigA', fileName: 'config-a', isEnum: false, properties: [] },
+      { name: 'ConfigB', fileName: 'config-b', isEnum: false, properties: [] },
+    ];
+
+    const output = await writer.write(
+      mockModel,
+      mockedModels,
+      new Set(),
+      '1.0.0',
+      'OpenAPI TEST',
+      '3.1.0',
+    );
+
+    expect(output.generatedCode).toContain("import { ConfigA } from './config-a.dto';");
+    expect(output.generatedCode).toContain("import { ConfigB } from './config-b.dto';");
+    expect(output.generatedCode).toContain('public imageValues?: Record<string, ConfigA[]>;');
+    expect(output.generatedCode).toContain(
+      'public document?: { fileInfo?: ConfigB; name?: string };',
+    );
+  });
+
   it('should map MATCHES validator to a regex, handle string params, and gracefully ignore unsupported validators', async () => {
     const loggerWarnSpy = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
 

@@ -124,6 +124,22 @@ const collectDecoratorArguments = (
   return args;
 };
 
+/** Collects every named binding imported by the file. */
+const collectImportedNames = (sourceFile: ts.SourceFile): string[] => {
+  const names: string[] = [];
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      names.push(element.name.text);
+    }
+  }
+
+  return names;
+};
+
 /** Collects the source text of every class property name, quotes included. */
 const collectPropertyNames = (sourceFile: ts.SourceFile): string[] => {
   const names: string[] = [];
@@ -332,6 +348,37 @@ describe('nog-cli generator E2E', () => {
 
       expect(names).toContain("'openGeoDB:postal_codes'");
       expect(names).toContain('lat');
+    });
+  });
+
+  describe('Inline object types with nested arrays, enums and refs', () => {
+    const inlineOutput = 'test-output/e2e-nested-inline';
+    let report: ParsedFile;
+
+    beforeAll(async () => {
+      fs.rmSync(path.resolve(inlineOutput), { recursive: true, force: true });
+      await runCli(['generate', path.resolve('test/fixtures/complex.json'), '-o', inlineOutput]);
+
+      const files = collectTypeScriptFiles(path.resolve(inlineOutput));
+      report = files.find((file) => file.filename === 'nested-inline-report.dto.ts')!;
+      expect(report).toBeDefined();
+    });
+
+    it('quotes an anonymous enum nested inside an inline object', () => {
+      expect(report.sourceFile.text).toContain("state?: 'NEW' | 'DONE'");
+    });
+
+    it('keeps the array suffix on nested inline object arrays', () => {
+      expect(report.sourceFile.text).toContain('entries?: { label?: string; post?: Post }[]');
+      expect(report.sourceFile.text).toContain('commentsByKey?: Record<string, Comment[]>');
+    });
+
+    it('imports the refs reached only through nested inline objects', () => {
+      const imported = collectImportedNames(report.sourceFile);
+
+      // `User` sits one level down, `Post` inside an array two levels down, and
+      // `Comment` is the element type of a Record value.
+      expect(imported).toEqual(expect.arrayContaining(['User', 'Post', 'Comment']));
     });
   });
 

@@ -1,6 +1,9 @@
 import { OpenAPIV3 } from 'openapi-types';
 
 import { IrModel, IrType, IrValidator } from '../interfaces';
+import { irTypeToTypeScript } from './type.serializer';
+
+const ARRAY_SUFFIX = /\[\]$/;
 
 /**
  * Utility class responsible for mapping OpenAPI schemas to Internal Representation (IR) types.
@@ -136,8 +139,7 @@ export class TypeMapper {
         types.push(model ? model.name : refKey);
       } else {
         const mapped = this.map(item, registry);
-        const raw = Array.isArray(mapped.rawType) ? mapped.rawType.join(' | ') : mapped.rawType;
-        types.push(raw);
+        types.push(irTypeToTypeScript(mapped));
       }
     }
 
@@ -173,6 +175,8 @@ export class TypeMapper {
       isArray: true,
       isPrimitive: itemType.isPrimitive,
       composition: itemType.composition,
+      // An array of inline objects still owes its element's nested $refs an import.
+      referencedTypes: itemType.referencedTypes,
     };
   }
 
@@ -189,11 +193,7 @@ export class TypeMapper {
 
       if (typeof schema.additionalProperties === 'object') {
         const valueType = this.map(schema.additionalProperties, registry, context);
-        // If the value type is complex (e.g. array or union), simple string interpolation might be tricky,
-        // but for now strict rawType usage is assumed sufficient.
-        const valueTypeName = Array.isArray(valueType.rawType)
-          ? valueType.rawType.join(' | ')
-          : valueType.rawType;
+        const valueTypeName = irTypeToTypeScript(valueType);
 
         return {
           rawType: `Record<string, ${valueTypeName}>`,
@@ -215,25 +215,16 @@ export class TypeMapper {
       for (const [propName, propSchema] of Object.entries(schema.properties)) {
         const isRequired = required.includes(propName);
         const propType = this.map(propSchema, registry, context);
-        const propTypeName = Array.isArray(propType.rawType)
-          ? propType.rawType.join(' | ')
-          : propType.rawType;
+        // Full rendering, not a bare join: nested arrays keep their `[]` and
+        // anonymous enums keep their quotes.
+        const propTypeName = irTypeToTypeScript(propType);
 
         const optional = isRequired ? '' : '?';
         fields.push(`${propName}${optional}: ${propTypeName}`);
 
         // Collect non-primitive, non-builtin types for import resolution
         if (!propType.isPrimitive) {
-          const rawTypes = Array.isArray(propType.rawType) ? propType.rawType : [propType.rawType];
-          for (const raw of rawTypes) {
-            // Split union types (e.g., 'Buffer | ReadStream') into individual types
-            const parts = raw.split('|').map((s) => s.trim());
-            for (const t of parts) {
-              if (!this.isBuiltInTypeForImport(t)) {
-                referencedTypes.push(t);
-              }
-            }
-          }
+          referencedTypes.push(...this.collectImportableTypes(propType));
         }
       }
 
@@ -302,6 +293,34 @@ export class TypeMapper {
 
   private static isPrimitiveType(type?: string): boolean {
     return type === 'string' || type === 'number' || type === 'integer' || type === 'boolean';
+  }
+
+  /**
+   * Names a property type contributes to its parent's import list.
+   *
+   * An inline object literal is opaque once rendered, so what matters are the
+   * refs it collected itself; anything else is split on unions and stripped of
+   * its array suffix, since the import is for the element type.
+   */
+  private static collectImportableTypes(type: IrType): string[] {
+    if (type.referencedTypes) {
+      return [...type.referencedTypes];
+    }
+
+    const rawTypes = Array.isArray(type.rawType) ? type.rawType : [type.rawType];
+    const names: string[] = [];
+
+    for (const raw of rawTypes) {
+      for (const part of raw.split('|')) {
+        const name = part.trim().replace(ARRAY_SUFFIX, '');
+        if (!name || name.startsWith('{') || name.startsWith('Record<')) continue;
+        if (!this.isBuiltInTypeForImport(name)) {
+          names.push(name);
+        }
+      }
+    }
+
+    return names;
   }
 
   private static isBuiltInTypeForImport(type: string): boolean {

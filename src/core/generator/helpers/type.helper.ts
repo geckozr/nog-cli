@@ -1,3 +1,4 @@
+import { irTypeToTypeScript } from '../../ir/analyzer/type.serializer';
 import { IrType } from '../../ir/interfaces';
 
 /**
@@ -13,31 +14,7 @@ export class TypeHelper {
    * @returns The TypeScript string representation (e.g., 'string[]', 'UserDto | AdminDto').
    */
   static irTypeToString(type: IrType): string {
-    let baseType: string;
-
-    if (Array.isArray(type.rawType)) {
-      const separator = type.composition === 'intersection' ? ' & ' : ' | ';
-      const items = type.rawType.map((t) => {
-        // If it's a primitive union (like an enum), we wrap values in quotes
-        if (type.composition === 'union' && type.isPrimitive) {
-          return `'${t}'`;
-        }
-        return t;
-      });
-      baseType = items.join(separator);
-    } else {
-      baseType = type.rawType;
-    }
-
-    if (type.isArray) {
-      // If the base type is complex (union/intersection), wrap it in parentheses before adding []
-      if (Array.isArray(type.rawType)) {
-        return `(${baseType})[]`;
-      }
-      return `${baseType}[]`;
-    }
-
-    return baseType;
+    return irTypeToTypeScript(type);
   }
 
   /**

@@ -204,6 +204,67 @@ describe('TypeMapper', () => {
         });
       });
 
+      it('should keep the array suffix on a nested array property', () => {
+        const schema: OpenAPIV3.SchemaObject = {
+          type: 'object',
+          properties: {
+            reports: { type: 'array', items: { type: 'object', properties: {} } },
+            tags: { type: 'array', items: { type: 'string' } },
+            owners: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+          },
+        };
+
+        const iType = TypeMapper.map(schema, registry);
+
+        expect(iType.rawType).toContain('tags?: string[]');
+        expect(iType.rawType).toContain('owners?: User[]');
+        expect(iType.referencedTypes).toContain('User');
+      });
+
+      it('should quote an anonymous enum nested in an inline object', () => {
+        const schema: OpenAPIV3.SchemaObject = {
+          type: 'object',
+          properties: {
+            state: { type: 'string', enum: ['NEW', 'DONE'] },
+          },
+        };
+
+        const iType = TypeMapper.map(schema, registry);
+
+        expect(iType.rawType).toBe("{ state?: 'NEW' | 'DONE' }");
+        expect(iType.referencedTypes).toBeUndefined();
+      });
+
+      it('should keep the array suffix on an additionalProperties value type', () => {
+        const schema: OpenAPIV3.SchemaObject = {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+        };
+
+        const iType = TypeMapper.map(schema, registry);
+
+        expect(iType.rawType).toBe('Record<string, User[]>');
+      });
+
+      it('should propagate refs from a nested inline object up to the parent', () => {
+        const schema: OpenAPIV3.SchemaObject = {
+          type: 'object',
+          properties: {
+            document: {
+              type: 'object',
+              properties: {
+                fileInfo: { $ref: '#/components/schemas/User' },
+              },
+            },
+            freeForm: { type: 'object' },
+          },
+        };
+
+        const iType = TypeMapper.map(schema, registry);
+
+        expect(iType.referencedTypes).toEqual(['User']);
+      });
+
       it('should handle object with additionalProperties as false (no properties → free-form fallback)', () => {
         const schema: OpenAPIV3.SchemaObject = {
           type: 'object',

@@ -405,6 +405,14 @@ export class DtoWriter {
       }
     }
 
+    // Inline object types carry their nested $refs here: the rawType is an
+    // opaque type-literal string, so these names would otherwise go unimported.
+    if (irType.referencedTypes) {
+      for (const refType of irType.referencedTypes) {
+        customImports.add(refType);
+      }
+    }
+
     if (irType.isArray) {
       return this.typeBuilder.createArray(baseTypeNode);
     }
@@ -416,12 +424,18 @@ export class DtoWriter {
    * Builds a Record<string, V> type node.
    * Only the value type V is registered as a custom import when it is not primitive.
    *
+   * A value type may carry an array suffix (`Record<string, StoredFile[]>`); the
+   * suffix is stripped before resolving the import, since the import is for the
+   * element type.
+   *
    * @param rawType The full Record type string, e.g. 'Record<string, UserRecords>'.
    * @param customImports The import registry to update with the value type, if needed.
    * @returns A TypeReferenceNode representing Record<string, V>.
    */
   private buildRecordTypeNode(rawType: string, customImports: Set<string>): ts.TypeReferenceNode {
-    const valueTypeName = TypeHelper.extractRecordValueType(rawType);
+    const rawValueType = TypeHelper.extractRecordValueType(rawType);
+    const isArrayValue = rawValueType?.endsWith('[]') ?? false;
+    const valueTypeName = isArrayValue ? rawValueType!.slice(0, -2) : rawValueType;
 
     let valueNode: ts.TypeNode;
     if (valueTypeName && !isPrimitiveTypeName(valueTypeName)) {
@@ -432,6 +446,10 @@ export class DtoWriter {
         ? (valueTypeName as PrimitiveTypeName)
         : 'any';
       valueNode = this.typeBuilder.createPrimitive(primitive);
+    }
+
+    if (isArrayValue) {
+      valueNode = this.typeBuilder.createArray(valueNode);
     }
 
     return this.typeBuilder.createReference('Record', [
