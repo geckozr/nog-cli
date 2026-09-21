@@ -99,6 +99,47 @@ const hasClassWithDecorator = (sourceFile: ts.SourceFile, decoratorName: string)
   return found;
 };
 
+/** Collects the first argument of every `@<decoratorName>(...)` found in the file. */
+const collectDecoratorArguments = (
+  sourceFile: ts.SourceFile,
+  decoratorName: string,
+): ts.Expression[] => {
+  const args: ts.Expression[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.canHaveDecorators(node)) {
+      for (const decorator of ts.getDecorators(node) ?? []) {
+        const expression = decorator.expression;
+        if (!ts.isCallExpression(expression)) continue;
+        if (!ts.isIdentifier(expression.expression)) continue;
+        if (expression.expression.text !== decoratorName) continue;
+        if (expression.arguments.length > 0) args.push(expression.arguments[0]);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return args;
+};
+
+/** Collects the source text of every class property name, quotes included. */
+const collectPropertyNames = (sourceFile: ts.SourceFile): string[] => {
+  const names: string[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyDeclaration(node)) {
+      names.push(node.name.getText(sourceFile));
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return names;
+};
+
 const hasMethodDeclaration = (sourceFile: ts.SourceFile): boolean => {
   let found = false;
 
@@ -247,6 +288,50 @@ describe('nog-cli generator E2E', () => {
       if (phoneFile) {
         expect(phoneFile.sourceFile.text).toMatch(/declare public name\??:/);
       }
+    });
+  });
+
+  describe('Negative bounds and non-identifier property keys', () => {
+    const geoOutput = 'test-output/e2e-geo-point';
+    let geoPoint: ts.SourceFile;
+
+    beforeAll(async () => {
+      fs.rmSync(path.resolve(geoOutput), { recursive: true, force: true });
+      await runCli(['generate', path.resolve('test/fixtures/complex.json'), '-o', geoOutput]);
+
+      const files = collectTypeScriptFiles(path.resolve(geoOutput));
+      geoPoint = files.find((file) => file.filename === 'geo-point.dto.ts')!.sourceFile;
+      expect(geoPoint).toBeDefined();
+    });
+
+    it('emits a negative @Min bound as a prefix unary expression', () => {
+      const bounds = collectDecoratorArguments(geoPoint, 'Min');
+
+      expect(bounds).toHaveLength(2);
+      for (const argument of bounds) {
+        expect(ts.isPrefixUnaryExpression(argument)).toBe(true);
+        const unary = argument as ts.PrefixUnaryExpression;
+        expect(unary.operator).toBe(ts.SyntaxKind.MinusToken);
+        expect(ts.isNumericLiteral(unary.operand)).toBe(true);
+      }
+      expect(geoPoint.text).toContain('@Min(-90)');
+      expect(geoPoint.text).toContain('@Min(-180)');
+    });
+
+    it('emits a positive @Max bound as a plain numeric literal', () => {
+      const bounds = collectDecoratorArguments(geoPoint, 'Max');
+
+      expect(bounds).toHaveLength(2);
+      for (const argument of bounds) {
+        expect(ts.isNumericLiteral(argument)).toBe(true);
+      }
+    });
+
+    it('quotes a property key that is not a valid identifier', () => {
+      const names = collectPropertyNames(geoPoint);
+
+      expect(names).toContain("'openGeoDB:postal_codes'");
+      expect(names).toContain('lat');
     });
   });
 

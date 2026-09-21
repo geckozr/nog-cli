@@ -96,6 +96,39 @@ describe('DtoWriter', () => {
     expect(output.generatedCode).toContain('}');
   });
 
+  it('should emit negative validator bounds and quoted property names', async () => {
+    const mockModel: IrModel = {
+      name: 'GeoPointDto',
+      fileName: 'geo-point-dto',
+      isEnum: false,
+      properties: [
+        {
+          name: 'lon',
+          type: { rawType: 'number', isArray: false, isPrimitive: true },
+          isOptional: false,
+          isReadonly: false,
+          validators: [
+            { type: 'MIN', params: -180 },
+            { type: 'MAX', params: 180 },
+          ],
+        },
+        {
+          name: 'openGeoDB:postal_codes',
+          type: { rawType: 'string', isArray: false, isPrimitive: true },
+          isOptional: true,
+          isReadonly: false,
+          validators: [],
+        },
+      ],
+    };
+
+    const output = await writer.write(mockModel, [], new Set(), '1.0.0', 'OpenaApi TEST', '3.1.0');
+
+    expect(output.generatedCode).toContain('@Min(-180)');
+    expect(output.generatedCode).toContain('@Max(180)');
+    expect(output.generatedCode).toContain("public 'openGeoDB:postal_codes'?: string;");
+  });
+
   it('should generate imports for custom DTO references and format the file correctly', async () => {
     const mockModel: IrModel = {
       name: 'AccountBalanceLimitsData',

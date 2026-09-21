@@ -831,6 +831,28 @@
             "items": { "type": "string" }
           }
         }
+      },
+      "GeoPoint": {
+        "type": "object",
+        "description": "Numeric bounds that go negative and a wire key that is not a valid TS identifier.",
+        "properties": {
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Latitude in degrees."
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Longitude in degrees."
+          },
+          "openGeoDB:postal_codes": {
+            "type": "string",
+            "description": "OSM-style key that must stay verbatim on the wire."
+          }
+        }
       }
     }
   }

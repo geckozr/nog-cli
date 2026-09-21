@@ -8,6 +8,7 @@ const NOT_ALPHANUMERIC = /[^a-zA-Z0-9_]/g;
 const LEADING_DIGIT = /^[0-9]/;
 const KEBAB_CAMEL_CASE = /([a-z0-9])([A-Z])/g;
 const KEBAB_ACRONYM = /([A-Z])([A-Z][a-z])/g;
+const VALID_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 // TypeScript reserved keywords and global objects that cannot be used as identifiers
 const RESERVED_KEYWORDS = new Set([
@@ -187,6 +188,19 @@ export function generateOperationId(method: string, path: string): string {
     .join('');
 
   return toCamelCase(method.toLowerCase() + cleanPath);
+}
+
+/**
+ * Checks whether a name can be emitted as a bare TypeScript identifier.
+ * Names that fail this check (for example the OSM-style `openGeoDB:postal_codes`
+ * returned by some specs) must be emitted as quoted members instead of being
+ * renamed, since the wire format depends on the original key.
+ *
+ * @param name - The name to check
+ * @returns true if the name is a valid identifier, false otherwise
+ */
+export function isValidIdentifier(name: string): boolean {
+  return VALID_IDENTIFIER.test(name);
 }
 
 /**

@@ -47,6 +47,17 @@ describe('ExpressionBuilder', () => {
     expect(await printExpr(falsishNode)).toBe('false'); // Should still be false even if input is a string
   });
 
+  it('should create a numeric literal', async () => {
+    expect(await printExpr(builder.createNumericLiteral(42))).toBe('42');
+    expect(await printExpr(builder.createNumericLiteral(0))).toBe('0');
+    expect(await printExpr(builder.createNumericLiteral(1.5))).toBe('1.5');
+  });
+
+  it('should create a negative numeric literal as a unary minus expression', async () => {
+    expect(await printExpr(builder.createNumericLiteral(-180))).toBe('-180');
+    expect(await printExpr(builder.createNumericLiteral(-0.5))).toBe('-0.5');
+  });
+
   it('should create an array literal', async () => {
     const node = builder.createArrayLiteral([
       builder.createStringLiteral('a'),

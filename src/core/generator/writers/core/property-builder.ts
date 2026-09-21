@@ -1,5 +1,6 @@
 import ts from 'typescript';
 
+import { isValidIdentifier } from '../../../../utils/naming';
 import { CommentModifier } from './comment-modifier';
 
 export interface PropertyBuilderOptions {
@@ -54,9 +55,15 @@ export class PropertyBuilder {
       ? ts.factory.createToken(ts.SyntaxKind.QuestionToken)
       : ts.factory.createToken(ts.SyntaxKind.ExclamationToken);
 
+    // Keys that are not valid identifiers (e.g. "openGeoDB:postal_codes") have to
+    // stay verbatim on the wire, so they are emitted as quoted members.
+    const propertyName = isValidIdentifier(name)
+      ? ts.factory.createIdentifier(name)
+      : ts.factory.createStringLiteral(name);
+
     const propertyNode = ts.factory.createPropertyDeclaration(
       modifiers,
-      ts.factory.createIdentifier(name),
+      propertyName,
       questionToken,
       typeNode,
       undefined,

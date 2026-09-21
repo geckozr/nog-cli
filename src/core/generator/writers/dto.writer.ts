@@ -460,7 +460,7 @@ export class DtoWriter {
       const args: ts.Expression[] = [];
       if (val.params !== undefined) {
         if (typeof val.params === 'number') {
-          args.push(ts.factory.createNumericLiteral(val.params));
+          args.push(this.expressionBuilder.createNumericLiteral(val.params));
         } else if (val.type === 'MATCHES') {
           args.push(ts.factory.createRegularExpressionLiteral(`/${val.params}/`));
         } else if (typeof val.params === 'string') {

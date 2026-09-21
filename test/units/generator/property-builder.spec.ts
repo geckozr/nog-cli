@@ -43,6 +43,15 @@ describe('PropertyBuilder', () => {
     expect(result.generatedCode).toContain('public lastName?: string;');
   });
 
+  it('should quote a name that is not a valid identifier', async () => {
+    const node = propertyBuilder.create('openGeoDB:postal_codes', stringTypeNode, {
+      isOptional: true,
+    });
+    const result = await printer.print([wrapInClass(node)]);
+
+    expect(result.generatedCode).toContain("public 'openGeoDB:postal_codes'?: string;");
+  });
+
   it('should create a readonly property', async () => {
     const node = propertyBuilder.create('id', stringTypeNode, { isReadonly: true });
     const result = await printer.print([wrapInClass(node)]);

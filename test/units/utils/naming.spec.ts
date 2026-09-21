@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   generateOperationId,
   isReservedWord,
+  isValidIdentifier,
   renameIfReserved,
   sanitizeName,
   toCamelCase,
@@ -104,6 +105,24 @@ describe('Naming', () => {
       expect(isReservedWord('User')).toBe(false);
       expect(isReservedWord('UserDto')).toBe(false);
       expect(isReservedWord('myCustomType')).toBe(false);
+    });
+  });
+
+  describe('isValidIdentifier', () => {
+    it('should accept names usable as bare identifiers', () => {
+      expect(isValidIdentifier('postalCode')).toBe(true);
+      expect(isValidIdentifier('_private')).toBe(true);
+      expect(isValidIdentifier('$ref')).toBe(true);
+      expect(isValidIdentifier('level2')).toBe(true);
+    });
+
+    it('should reject names that must be quoted', () => {
+      expect(isValidIdentifier('openGeoDB:postal_codes')).toBe(false);
+      expect(isValidIdentifier('addr:street')).toBe(false);
+      expect(isValidIdentifier('2ndLine')).toBe(false);
+      expect(isValidIdentifier('with space')).toBe(false);
+      expect(isValidIdentifier('kebab-case')).toBe(false);
+      expect(isValidIdentifier('')).toBe(false);
     });
   });
 

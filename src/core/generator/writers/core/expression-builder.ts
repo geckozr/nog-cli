@@ -47,6 +47,22 @@ export class ExpressionBuilder {
     return value ? ts.factory.createTrue() : ts.factory.createFalse();
   }
 
+  /**
+   * Creates a numeric literal, wrapping negative values in a unary minus.
+   * `ts.factory.createNumericLiteral` asserts on negative input, so the sign has
+   * to be modelled as a prefix expression rather than baked into the literal.
+   */
+  public createNumericLiteral(value: number): ts.Expression {
+    if (value < 0) {
+      return ts.factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.MinusToken,
+        ts.factory.createNumericLiteral(Math.abs(value)),
+      );
+    }
+
+    return ts.factory.createNumericLiteral(value);
+  }
+
   /** Creates a string literal ("text") */
   public createStringLiteral(text: string): ts.StringLiteral {
     return ts.factory.createStringLiteral(text);
